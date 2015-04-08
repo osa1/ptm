@@ -58,12 +58,17 @@ transformExp :: HSE.Exp -> Parser Term
 transformExp (HSE.Var qname) = Var <$> transformQName qname
 transformExp (HSE.Con qname) = fmap Var $ transformQName qname >>= conFunctionName
 transformExp (HSE.Lit lit) = Value <$> transformLit lit
-transformExp (HSE.App e1 e2) = transformExp e2 >>= \case
-    Var v -> App <$> transformExp e1 <*> pure v
-    t2    -> do
-      t1 <- transformExp e1
-      v <- freshVar
-      return $ LetRec [(v, t2)] (App t1 v)
+transformExp (HSE.App e1 e2) = do
+    e1' <- transformExp e1
+    e2' <- transformExp e2
+    introLet e2' $ \v -> return $ App e1' v
+transformExp (HSE.InfixApp e1 op e2) = do
+    e1' <- transformExp e1
+    e2' <- transformExp e2
+    op' <- opName op
+    introLet e1' $ \v1 ->
+      introLet e2' $ \v2 ->
+        return $ App (App (Var op') v1) v2
 transformExp (HSE.Lambda _ pats body) = lambda <$> collectArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
     e1' <- transformExp e1
@@ -74,6 +79,18 @@ transformExp (HSE.Paren e) = transformExp e
 transformExp (HSE.Case e alts) = Case <$> transformExp e <*> mapM transformAlt alts
 transformExp (HSE.List es) = list =<< mapM transformExp es
 transformExp e = throwError $ "Unsupported exp: " ++ show e
+
+introLet :: Term -> (Var -> Parser Term) -> Parser Term
+introLet (Var v) f = f v
+introLet t       f = do
+    v <- freshVar
+    f v >>= \case
+      LetRec binds body -> return $ LetRec ((v, t) : binds) body
+      t'                -> return $ LetRec [(v, t)] t'
+
+elimBinds :: [(Var, Term)] -> Term -> Term
+elimBinds [] t = t
+elimBinds bs t = LetRec bs t
 
 collectArgs :: [HSE.Pat] -> Parser [Var]
 collectArgs [] = return []
@@ -151,4 +168,11 @@ transformQName :: HSE.QName -> Parser Var
 transformQName q@HSE.Qual{} = throwError $ "Qualified names are not supported: " ++ show q
 transformQName (HSE.UnQual n) = return $ nameVar n
 transformQName (HSE.Special HSE.Cons) = return "(:)"
+transformQName (HSE.Special HSE.UnitCon) = return "()"
 transformQName (HSE.Special s) = throwError $ "Unsupported special name: " ++ show s
+
+opName :: HSE.QOp -> Parser Var
+opName (HSE.QVarOp qName) = transformQName qName
+opName (HSE.QConOp qName) =
+    -- FIXME: should be careful about partial constructor applications
+    transformQName qName

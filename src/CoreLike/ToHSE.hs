@@ -8,7 +8,7 @@ import CoreLike.Syntax
 
 hseModule :: [(Var, Term)] -> HSE.Module
 hseModule decls =
-    HSE.Module dummyLoc (HSE.ModuleName "main") [] Nothing Nothing [] $ map bindToHSE decls
+    HSE.Module dummyLoc (HSE.ModuleName "Main") [] Nothing Nothing [] $ map bindToHSE decls
 
 termToHSE :: Term -> HSE.Exp
 termToHSE (Var v) =
@@ -27,8 +27,9 @@ termToHSE (LetRec binds rhs) =
 valueToHSE :: Value -> HSE.Exp
 valueToHSE (Lambda var rhs) =
     -- FIXME: use some dummy value for locs
-    -- TODO: Merge nested lambdas
-    HSE.Lambda dummyLoc [HSE.PVar (HSE.Ident var)] (termToHSE rhs)
+    case termToHSE rhs of
+      HSE.Lambda _ pats body -> HSE.Lambda dummyLoc (HSE.PVar (HSE.Ident var) : pats) body
+      body -> HSE.Lambda dummyLoc [HSE.PVar (HSE.Ident var)] body
 valueToHSE (Data con args) =
     -- FIXME: Handle special symbols
     foldr (\arg f -> HSE.App f (HSE.Var (HSE.UnQual (HSE.Ident arg))))
@@ -50,11 +51,13 @@ altConToHSE (DefaultAlt (Just v)) = HSE.PVar (HSE.Ident v)
 
 bindToHSE :: (Var, Term) -> HSE.Decl
 bindToHSE (v, t) =
-    HSE.FunBind [HSE.Match dummyLoc (HSE.Ident "")
-                   [HSE.PVar (HSE.Ident v)]
-                   Nothing
-                   (HSE.UnGuardedRhs $ termToHSE t)
-                   (HSE.BDecls [])]
+    case termToHSE t of
+      HSE.Lambda _ pats body ->
+        HSE.FunBind [HSE.Match dummyLoc (HSE.Ident v) pats Nothing (HSE.UnGuardedRhs body)
+                      (HSE.BDecls [])]
+      t' ->
+        HSE.FunBind [HSE.Match dummyLoc (HSE.Ident v) [] Nothing (HSE.UnGuardedRhs t')
+                      (HSE.BDecls [])]
 
 litToHSE :: Literal -> HSE.Literal
 litToHSE (Int i) = HSE.Int i

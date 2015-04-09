@@ -80,6 +80,8 @@ transformExp (HSE.Case e alts) = Case <$> transformExp e <*> mapM transformAlt a
 transformExp (HSE.List es) = list =<< mapM transformExp es
 transformExp e = throwError $ "Unsupported exp: " ++ show e
 
+-- | Introduce a let-binding for the term. Combines 'LetRec's returned by term
+-- builder.
 introLet :: Term -> (Var -> Parser Term) -> Parser Term
 introLet (Var v) f = f v
 introLet t       f = do
@@ -105,6 +107,10 @@ transformPat (HSE.PVar v) = return $ DefaultAlt (Just $ nameVar v)
 transformPat (HSE.PApp qname pats) = do
     con <- transformQName qname
     args <- collectArgs pats
+    return $ DataAlt con args
+transformPat (HSE.PInfixApp p1 op p2) = do
+    con <- transformQName op
+    args <- collectArgs [p1, p2]
     return $ DataAlt con args
 transformPat (HSE.PList []) = return $ DataAlt "[]" []
 transformPat (HSE.PLit _sign lit) = transformLitPat lit

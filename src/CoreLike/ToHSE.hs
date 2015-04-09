@@ -16,7 +16,6 @@ termToHSE (Var v) =
     HSE.Var (HSE.UnQual (HSE.Ident v))
 termToHSE (Value v) = valueToHSE v
 termToHSE (App term var) =
-    -- TODO: Merge nested applications.
     -- TODO: Inline variable if it's used once.
     HSE.App (termToHSE term) (HSE.Var (HSE.UnQual (HSE.Ident var)))
 termToHSE (Case scr cases) =
@@ -43,6 +42,11 @@ altToHSE (con, t) =
     HSE.Alt dummyLoc (altConToHSE con) (HSE.UnGuardedRhs $ termToHSE t) (HSE.BDecls [])
 
 altConToHSE :: AltCon -> HSE.Pat
+
+-- special cases
+altConToHSE (DataAlt "(:)" [a1, a2]) =
+    HSE.PInfixApp (HSE.PVar $ HSE.Ident a1) (HSE.Special HSE.Cons) (HSE.PVar $ HSE.Ident a2)
+
 altConToHSE (DataAlt con args) =
     HSE.PApp (HSE.UnQual $ HSE.Ident con) (map (HSE.PVar . HSE.Ident) args)
 altConToHSE (LiteralAlt lit) = HSE.PLit HSE.Signless $ litToHSE lit

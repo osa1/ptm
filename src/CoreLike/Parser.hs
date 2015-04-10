@@ -68,7 +68,12 @@ transformExp (HSE.InfixApp e1 op e2) = do
     op' <- opName op
     introLet e1' $ \v1 ->
       introLet e2' $ \v2 ->
-        return $ App (App (Var op') v1) v2
+        case op of
+          HSE.QConOp{} ->
+            -- FIXME: Make sure the application is not partial, in that case we
+            -- should be using function variant instead
+            return $ Value $ Data op' [v1, v2]
+          _ -> return $ App (App (Var op') v1) v2
 transformExp (HSE.Lambda _ pats body) = lambda <$> collectArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
     e1' <- transformExp e1
@@ -78,6 +83,8 @@ transformExp (HSE.If e1 e2 e3) = do
 transformExp (HSE.Paren e) = transformExp e
 transformExp (HSE.Case e alts) = Case <$> transformExp e <*> mapM transformAlt alts
 transformExp (HSE.List es) = list =<< mapM transformExp es
+transformExp (HSE.Let (HSE.BDecls decls) body) =
+    LetRec <$> mapM transformDecl decls <*> transformExp body
 transformExp e = throwError $ "Unsupported exp: " ++ show e
 
 -- | Introduce a let-binding for the term. Combines 'LetRec's returned by term

@@ -11,6 +11,9 @@ hseModule decls =
     HSE.Module dummyLoc (HSE.ModuleName "Main") [] Nothing Nothing [] $ map bindToHSE decls
 
 termToHSE :: Term -> HSE.Exp
+
+-- FIXME: Handle special symbols here
+termToHSE (Var "+") = HSE.Var (HSE.UnQual (HSE.Symbol "+"))
 termToHSE (Var v) =
     -- FIXME: This variable may contain dots, maybe take that into account
     HSE.Var (HSE.UnQual (HSE.Ident v))

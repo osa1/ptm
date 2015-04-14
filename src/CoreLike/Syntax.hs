@@ -1,5 +1,6 @@
 module CoreLike.Syntax where
 
+import Control.Arrow (second)
 import qualified Data.Set as S
 
 type Var = String
@@ -39,6 +40,9 @@ data Value
   -- | Indirect Var
   deriving (Show, Eq, Ord)
 
+------------------------------
+-- * Collecting free variables
+
 fvsTerm :: Term -> S.Set Var
 fvsTerm (Var v) = S.singleton v
 fvsTerm (Value val) = fvsVal val
@@ -51,7 +55,7 @@ fvsTerm (LetRec bindings body) =
 fvsVal :: Value -> S.Set Var
 fvsVal (Lambda arg body) = S.delete arg $ fvsTerm body
 fvsVal (Data _ args) = S.fromList args
-fvsVAl Literal{} = S.empty
+fvsVal Literal{} = S.empty
 
 fvsCase :: (AltCon, Term) -> S.Set Var
 fvsCase (DataAlt _ args, rhs) = fvsTerm rhs `S.difference` S.fromList args
@@ -64,3 +68,45 @@ fvsBindings bs =
     let binds = S.fromList $ map fst bs
         rhss  = S.unions $ map (fvsTerm . snd) bs
      in (binds, rhss `S.difference` binds)
+
+------------------
+-- * Substitutions
+
+substTerm :: Var -> Term -> Term -> Term
+substTerm v' t' t@(Var v)
+    | v == v'   = t'
+    | otherwise = t
+substTerm v' t' (Value v) = substVal v' t' v
+substTerm v' t' (App t v)
+    | v == v'   =
+        -- TODO: We can do some simplifications here
+        LetRec [(v', t')] $ App (substTerm v' t' t) v'
+    | otherwise =
+        App (substTerm v' t' t) v
+substTerm v' t' (PrimOp op ts) = PrimOp op $ map (substTerm v' t') ts
+substTerm v' t' (Case t cases) = Case (substTerm v' t' t) (map (substCase v' t') cases)
+substTerm v' t' lr@(LetRec binds rhs) =
+    if v' `elem` map fst binds
+       then lr
+       else LetRec (map (second (substTerm v' t')) binds) (substTerm v' t' rhs)
+
+substCase :: Var -> Term -> (AltCon, Term) -> (AltCon, Term)
+substCase v' t' alt@(DataAlt con args, rhs)
+    | v' `elem` args = alt
+    | otherwise = (DataAlt con args, substTerm v' t' rhs)
+substCase v' t' (l@LiteralAlt{}, rhs) = (l, substTerm v' t' rhs)
+substCase v' t' (DefaultAlt Nothing, rhs) = (DefaultAlt Nothing, substTerm v' t' rhs)
+substCase v' t' alt@(DefaultAlt (Just v), rhs)
+    | v == v'   = alt
+    | otherwise = (DefaultAlt (Just v), substTerm v' t' rhs)
+
+substVal :: Var -> Term -> Value -> Term
+substVal v' t' l@(Lambda v t)
+    | v == v'   = Value $ l
+    | otherwise = Value $ Lambda v (substTerm v' t' t)
+substVal v' t' d@(Data con args)
+    | v' `elem` args =
+        -- TODO: simplify if t' is var
+        LetRec [(v', t')] $ Value $ Data con args
+    | otherwise = Value d
+substVal _  _  l@Literal{} = Value l

@@ -54,6 +54,7 @@ test-suite tests
   build-depends:
     base >=4.7 && <5,
     containers,
+    deepseq,
     directory,
     filepath,
     haskell-src-exts,

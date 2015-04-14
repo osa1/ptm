@@ -10,19 +10,18 @@ import Test.HUnit
 
 import CoreLike.Parser
 import CoreLike.Syntax
+import TestUtils
 
 main :: IO ()
 main = hspec spec
 
-fromRight (Right r) = r
-fromRight (Left l)  = error $ "fromRight: found Left: " ++ show l
-
 spec :: Spec
 spec = do
-    fromHUnitTest $ TestList
-      [ TestCase $ fvsEq "\\a -> a + b" ["+", "b"]
-      , TestCase $ fvsEq "case x of A a -> f a b; y -> x + y; _ -> z" ["+", "f", "x", "b", "z"]
-      ]
+    describe "free variables" $ do
+      fromHUnitTest $ TestList
+        [ TestCase $ fvsEq "\\a -> a + b" ["+", "b"]
+        , TestCase $ fvsEq "case x of A a -> f a b; y -> x + y; _ -> z" ["+", "f", "x", "b", "z"]
+        ]
 
 fvsEq :: String -> [Var] -> Assertion
 fvsEq term fvs =

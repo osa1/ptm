@@ -36,6 +36,15 @@ parse contents =
 parseFile :: FilePath -> IO (Either String [(Var, Term)])
 parseFile file = parse <$> readFile file
 
+parseTerm :: String -> Either String Term
+parseTerm str =
+    case HSE.parseExp str of
+      HSE.ParseOk hse ->
+         runExcept (evalStateT (unwrapParser $ transformExp hse) initParserState)
+      HSE.ParseFailed loc err ->
+        Left $ "fromParseResult: Parse failed at [" ++ HSE.srcFilename loc
+                 ++ "] (" ++ show (HSE.srcLine loc) ++ ":" ++ show (HSE.srcColumn loc) ++ "): " ++ err
+
 
 transformHSE :: HSE.Module -> Parser [(Var, Term)]
 transformHSE (HSE.Module _ _ _ _ _ _ decls) = mapM transformDecl decls
@@ -152,8 +161,8 @@ list ts = do
   where
     termLets :: [Term] -> Parser ([(Var, Term)], [Var])
     termLets [] = return ([], [])
-    termLets (t : ts) = do
-      (lets, vars) <- termLets ts
+    termLets (t : rest) = do
+      (lets, vars) <- termLets rest
       case t of
         Var v -> return (lets, v : vars)
         _     -> do

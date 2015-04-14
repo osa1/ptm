@@ -38,7 +38,7 @@ valueToHSE (Data con args) =
           (HSE.Con (HSE.UnQual (HSE.Ident con))) args
 valueToHSE (Literal (Int i)) = HSE.Lit (HSE.Int i)
 valueToHSE (Literal (Char c)) = HSE.Lit (HSE.Char c)
-valueToHSE ind@Indirect{} = error $ "Can't translate Indirects to HSE: " ++ show ind
+-- valueToHSE ind@Indirect{} = error $ "Can't translate Indirects to HSE: " ++ show ind
 
 altToHSE :: (AltCon, Term) -> HSE.Alt
 altToHSE (con, t) =

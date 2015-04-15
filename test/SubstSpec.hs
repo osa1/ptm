@@ -24,8 +24,7 @@ spec = do
       fromHUnitTest $ TestList
         [ substEq "lambda1" "\\x -> x" "x" "1 + 2" "\\x -> x"
         , substEq "let1" "let x = y in x + y" "x" "y" "let x = y in x + y"
-          -- FIXME: This should be simplified
-        , substEq "let2" "let x = y in x + y" "y" "x" "let x = x in let y = x in x + y"
+        , substEq "let2" "let x = y in x + y" "y" "x" "let x = x in x + x"
           -- FIXME: Several issues here:
           --   - Need to do alpha renaming.
           --   - Need a "equality modulo alpha-renaming" test. (because we
@@ -33,7 +32,7 @@ spec = do
           --   - We may need to float lets to outer levels as much as possible.
         , substEq "case1" "case x of { Blah a b -> a + b; y -> x + y }"
                           "x" "Data x y"
-                          "case Data x y of { Blah a b -> a + b; y -> Data x y + y }"
+                          "case Data x y of { Blah a b -> a + b; y -> (let x = Data x y in (+) x) y }"
           -- FIXME: We again need renaming here.
         , substEq "case simple 1" "case x of { y -> x + y }"
                                   "x" "y"

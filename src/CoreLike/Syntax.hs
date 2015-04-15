@@ -79,8 +79,9 @@ substTerm v' t' t@(Var v)
 substTerm v' t' (Value v) = substVal v' t' v
 substTerm v' t' (App t v)
     | v == v'   =
-        -- TODO: We can do some simplifications here
-        LetRec [(v', t')] $ App (substTerm v' t' t) v'
+        case t' of
+          Var newVar -> App (substTerm v' t' t) newVar
+          _          -> LetRec [(v', t')] $ App (substTerm v' t' t) v'
     | otherwise =
         App (substTerm v' t' t) v
 substTerm v' t' (PrimOp op ts) = PrimOp op $ map (substTerm v' t') ts
@@ -102,11 +103,12 @@ substCase v' t' alt@(DefaultAlt (Just v), rhs)
 
 substVal :: Var -> Term -> Value -> Term
 substVal v' t' l@(Lambda v t)
-    | v == v'   = Value $ l
+    | v == v'   = Value l
     | otherwise = Value $ Lambda v (substTerm v' t' t)
 substVal v' t' d@(Data con args)
     | v' `elem` args =
-        -- TODO: simplify if t' is var
-        LetRec [(v', t')] $ Value $ Data con args
+        case t' of
+          Var newV -> Value $ Data con $ map (\a -> if a == v' then newV else a) args
+          _        -> LetRec [(v', t')] $ Value $ Data con args
     | otherwise = Value d
 substVal _  _  l@Literal{} = Value l

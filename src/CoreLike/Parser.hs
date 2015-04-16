@@ -45,6 +45,8 @@ parseTerm str =
         Left $ "fromParseResult: Parse failed at [" ++ HSE.srcFilename loc
                  ++ "] (" ++ show (HSE.srcLine loc) ++ ":" ++ show (HSE.srcColumn loc) ++ "): " ++ err
 
+parseTerm' :: String -> Term
+parseTerm' = either error id . parseTerm
 
 transformHSE :: HSE.Module -> Parser [(Var, Term)]
 transformHSE (HSE.Module _ _ _ _ _ _ decls) = mapM transformDecl decls

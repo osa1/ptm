@@ -25,7 +25,8 @@ library
     deepseq,
     haskell-src-exts,
     mtl,
-    pretty
+    pretty,
+    wl-pprint >= 1.2 && < 1.3
 
   hs-source-dirs:      src
   default-language:    Haskell2010

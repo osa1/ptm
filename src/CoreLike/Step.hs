@@ -1,10 +1,16 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module CoreLike.Step where
 
 import Control.Arrow (second)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
+import qualified Language.Haskell.Exts as HSE
+import qualified Text.PrettyPrint.Leijen as PP
 
+import CoreLike.Parser
 import CoreLike.Syntax
+import CoreLike.ToHSE
 
 type Env = M.Map Var Term
 
@@ -144,3 +150,26 @@ stepPrimOp Multiply [Literal (Int i1), Literal (Int i2)] =
   Transient $ Value $ Literal $ Int $ i1 * i2
 stepPrimOp Divide [Literal (Int i1), Literal (Int i2)] =
   Transient $ Value $ Literal $ Int $ i1 `div` i2
+stepPrimOp _ _ = Stuck
+
+------------
+-- * Testing
+
+-- Use haskell-src-exts quoter(haskell-src-exts-qq) once #10279 is fixed.
+
+parseEnv :: [(String, String)] -> Env
+parseEnv [] = M.empty
+parseEnv ((v, t) : rest) =
+    let t' = either (error . (++) "Can't parse term in env: ") id $ parseTerm t
+     in M.insert v t' $ parseEnv rest
+
+env1 = parseEnv
+  [ ("even", "\\x -> case x of { 0 -> True; _ -> odd  (x - 1) }")
+  , ("odd",  "\\x -> case x of { 1 -> True; _ -> even (x - 1) }")
+  ]
+
+pprintEnv :: Env -> String
+pprintEnv = ($ "") . PP.displayS . PP.renderPretty 1 100 . PP.list . map (uncurry ppBinding) . M.toList
+  where
+    ppBinding :: Var -> Term -> PP.Doc
+    ppBinding v t = PP.text v PP.<+> PP.equals PP.</> PP.string (HSE.prettyPrint $ termToHSE t)

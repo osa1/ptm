@@ -166,10 +166,13 @@ parseEnv ((v, t) : rest) =
 env1 = parseEnv
   [ ("even", "\\x -> case x of { 0 -> True; _ -> odd  (x - 1) }")
   , ("odd",  "\\x -> case x of { 1 -> True; _ -> even (x - 1) }")
+  , ("simple", "even 1 || odd 2")
   ]
 
 pprintEnv :: Env -> String
-pprintEnv = ($ "") . PP.displayS . PP.renderPretty 1 100 . PP.list . map (uncurry ppBinding) . M.toList
+pprintEnv =
+    ($ "") . PP.displayS . PP.renderPretty 1 100 . PP.list . map (uncurry ppBinding) . M.toList
   where
     ppBinding :: Var -> Term -> PP.Doc
-    ppBinding v t = PP.text v PP.<+> PP.equals PP.</> PP.string (HSE.prettyPrint $ termToHSE t)
+    ppBinding v t =
+      PP.text v PP.<+> PP.equals PP.<$> PP.indent 1 (PP.string (HSE.prettyPrint $ termToHSE t))

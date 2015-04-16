@@ -27,7 +27,7 @@ data Term
   = Var Var
   | Value Value
   | App Term Var
-  | PrimOp PrimOp [Term]
+  | PrimOp PrimOp [Term] -- TODO: Why isn't this in ANF?
   | Case Term [(AltCon, Term)]
   | LetRec [(Var, Term)] Term
   deriving (Show, Eq, Ord)

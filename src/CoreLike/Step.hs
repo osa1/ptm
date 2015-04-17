@@ -34,6 +34,8 @@ data Step a
 --       then combining results.
 --       Find a way to nested step cases.
 
+-- TODO: We should move lets closer to use sites. (after unfolding applications)
+
 step :: Env -> Term -> Step Term
 step env (Var v) = maybe Stuck Transient $ M.lookup v env
 step _   Value{} = Stuck
@@ -41,6 +43,7 @@ step _   Value{} = Stuck
 step _   (App (Value (Lambda arg body)) var) = Transient $ substTerm arg (Var var) body
 step _   (App Value{} _) = Stuck
 step env (App t v) =
+    -- TODO: Handle: App (LetIn _ (Value Lambda{})) _ somehow.
     case step env t of
       Transient t' -> Transient $ App t' v
       Split ts     -> Split $ map (second $ flip App v) ts

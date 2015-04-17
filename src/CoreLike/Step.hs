@@ -48,7 +48,7 @@ step env (App t v) =
 
 step env (PrimOp op args) =
     case stepArgs args of
-      Transient args' -> Transient $ PrimOp op args
+      Transient args' -> Transient $ PrimOp op args'
       Split args'     -> Split $ map (second $ PrimOp op) args'
       Stuck           ->
         let vals = [ v | Value v <- args ]

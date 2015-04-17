@@ -25,6 +25,8 @@ termToHSE (Case scr cases) =
     HSE.Case (termToHSE scr) (map altToHSE cases)
 termToHSE (LetRec binds rhs) =
     HSE.Let (HSE.BDecls $ map bindToHSE binds) (termToHSE rhs)
+termToHSE (PrimOp op args) = primOpToHSE op args
+
 
 valueToHSE :: Value -> HSE.Exp
 valueToHSE (Lambda var rhs) =
@@ -39,6 +41,20 @@ valueToHSE (Data con args) =
 valueToHSE (Literal (Int i)) = HSE.Lit (HSE.Int i)
 valueToHSE (Literal (Char c)) = HSE.Lit (HSE.Char c)
 -- valueToHSE ind@Indirect{} = error $ "Can't translate Indirects to HSE: " ++ show ind
+
+primOpToHSE :: PrimOp -> [Term] -> HSE.Exp
+primOpToHSE op [t1, t2] = HSE.InfixApp (termToHSE t1) (primOpToQOp op) (termToHSE t2)
+primOpToHSE op args = error $ "Can't convert PrimOp to HSE: " ++ show op ++ ", " ++ show args
+
+primOpToQOp :: PrimOp -> HSE.QOp
+primOpToQOp Add           = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "+"
+primOpToQOp Subtract      = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "-"
+primOpToQOp Multiply      = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "*"
+primOpToQOp Divide        = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "/"
+primOpToQOp Modulo        = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "%"
+primOpToQOp Equal         = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "=="
+primOpToQOp LessThan      = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<"
+primOpToQOp LessThanEqual = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<="
 
 altToHSE :: (AltCon, Term) -> HSE.Alt
 altToHSE (con, t) =

@@ -2,8 +2,10 @@
 
 module CoreLike.Parser where
 
+import Control.Arrow (first)
 import Control.Monad.Except
 import Control.Monad.State.Strict
+import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 
 import CoreLike.Syntax
@@ -35,6 +37,13 @@ parse contents =
 
 parseFile :: FilePath -> IO (Either String [(Var, Term)])
 parseFile file = parse <$> readFile file
+
+prims :: M.Map HSE.QName PrimOp
+prims = M.fromList $ map (first $ HSE.UnQual . HSE.Symbol) symbols
+  where
+    symbols =
+      [ ("+", Add), ("-", Subtract), ("*", Multiply), ("/", Divide), ("%", Modulo),
+        ("==", Equal), ("<", LessThan), ("<=", LessThanEqual) ]
 
 parseTerm :: String -> Either String Term
 parseTerm str =
@@ -84,7 +93,11 @@ transformExp (HSE.InfixApp e1 op e2) = do
             -- FIXME: Make sure the application is not partial, in that case we
             -- should be using function variant instead
             return $ Value $ Data op' [v1, v2]
-          _ -> return $ App (App (Var op') v1) v2
+          HSE.QVarOp qname ->
+            case M.lookup qname prims of
+              Nothing -> return $ App (App (Var op') v1) v2
+              -- FIXME: No need to alpha-convert for prims
+              Just pOp -> return $ PrimOp pOp [Var v1, Var v2]
 transformExp (HSE.Lambda _ pats body) = lambda <$> collectArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
     e1' <- transformExp e1

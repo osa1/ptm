@@ -13,6 +13,7 @@ import System.Environment
 import qualified Text.PrettyPrint.Leijen as PP
 
 import CoreLike.Parser
+import CoreLike.Simplify
 import CoreLike.Step
 import CoreLike.Syntax
 import CoreLike.ToHSE
@@ -104,7 +105,7 @@ runREPL = do
             Nothing -> outputStrLn "What am I supposed to drive? (set a term using `term` command)"
             Just f  -> do
               let Config env restrs _steps term = fConfig f
-              case step env term of
+              case fmap simpl $ step env term of
                 Transient term' ->
                   -- Should I really update an old state here? When is this old
                   -- state not empty?

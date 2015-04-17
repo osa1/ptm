@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE DeriveFunctor, QuasiQuotes #-}
 
 module CoreLike.Step where
 
@@ -25,7 +25,7 @@ data Step a
   | Stuck -- Reason
           -- TODO: we may want to do something different depending on whether
           -- we're stuck because the term is already a value or not
-  deriving (Show)
+  deriving (Show, Functor)
 
 -- TODO: Should we keep stepping subexpressions when a term is stuck because of
 --       a type error?

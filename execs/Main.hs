@@ -46,6 +46,7 @@ newtype Level = Level (IM.IntMap (Env, Term, Maybe Level))
 -- (or is this already a zipper?)
 data Focus = Focus
   { fCurLvl    :: Int
+  , fStepNum   :: Int
   , fPrevFocus :: Maybe Focus -- Nothing if root
   , fConfig    :: Config
   }
@@ -59,11 +60,12 @@ data Config = Config
   }
 
 gotoToplevel :: Focus -> Focus
-gotoToplevel f@(Focus _ Nothing  _) = f
-gotoToplevel   (Focus _ (Just f) _) = gotoToplevel f
+gotoToplevel f@(Focus _ _ Nothing  _) = f
+gotoToplevel   (Focus _ i (Just f@(Focus _ _ _ cUp)) c) =
+    gotoToplevel f{fConfig = cUp{cSteps = IM.insert i c (cSteps cUp)}}
 
 initToplevel :: Term -> Env -> Focus
-initToplevel term env = Focus 0 Nothing (Config env [] IM.empty term)
+initToplevel term env = Focus 0 0 Nothing (Config env [] IM.empty term)
 
 runREPL :: IO ()
 runREPL = do
@@ -82,7 +84,7 @@ runREPL = do
             Right tm' -> do
               outputStrLn "Term parsed:"
               outputStrLn (HSE.prettyPrint $ termToHSE tm')
-              liftIO $ readIORef focus >>= \case
+              liftIO (readIORef focus) >>= \case
                 Nothing ->
                   liftIO $ writeIORef focus (Just $ initToplevel tm' M.empty)
                 Just f -> do
@@ -119,6 +121,21 @@ runREPL = do
             Right env ->
               liftIO $ writeIORef focus $ Just $ initToplevel (Value $ Data "()" []) (M.fromList env)
 
+        Just (MoveFocus i) ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't move focus, context is not set."
+            Just f@(Focus curLvl _ _ (Config _ _ steps _)) ->
+              case IM.lookup i steps of
+                Nothing -> outputStrLn "Can't move focus: No such context."
+                Just conf ->
+                  liftIO $ writeIORef focus $ Just $ Focus (curLvl + 1) i (Just f) conf
+
+        Just TopLevel ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't move focus, context is not set."
+            Just f  ->
+              liftIO $ writeIORef focus $ Just $ gotoToplevel f
+
         Just notSupported -> outputStrLn $ "Command not implemented yet: " ++ show notSupported
         Nothing -> outputStrLn "Can't parse that."
 
@@ -127,7 +144,7 @@ printFocus Nothing = do
     outputStrLn "Nothing in focus."
     outputStrLn "Load an environment using Load command."
     outputStrLn "Set focused term using Term command."
-printFocus (Just (Focus lvl _ c)) = do
+printFocus (Just (Focus lvl _ _ c)) = do
     outputStrLn $ "Current level: " ++ show lvl
     outputStrLn $ pprintConfigSteps c
 
@@ -137,8 +154,9 @@ pprintConfigSteps c = unlines $ iter 0 c
     iter :: Int -> Config -> [String]
     iter num (Config _env _restrs steps term) =
       let (f : r)   = lines $ HSE.prettyPrint $ termToHSE term
-          lnLen     = (length $ show $ IM.size steps) + 2
+          lnLen     = length $ show $ IM.size steps - 1
           numStr    = show num
-          pfxdLines = ((replicate (lnLen - length numStr - 2) ' ' ++ numStr ++ ". " ++ f) : r)
+          pfxdLines = ((replicate (lnLen - length numStr) ' ' ++ numStr ++ ". " ++ f) :
+                       (map (replicate (lnLen + 2) ' ' ++) r))
           stepLines = concatMap (map ("  " ++) . uncurry iter) $ IM.toList steps
        in pfxdLines ++ stepLines

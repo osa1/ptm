@@ -6,8 +6,9 @@ import Control.Monad.State
 import qualified Data.IntMap as IM
 import Data.IORef
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Language.Haskell.Exts as HSE
-import Safe
+import Safe (readMay)
 import System.Console.Haskeline
 import System.Environment
 import qualified Text.PrettyPrint.Leijen as PP
@@ -34,6 +35,7 @@ data REPLCmd
   | Move Int
   | Up
   | TopLevel
+  | ShowEnv -- TODO: maybe only shows used used parts
   | Load FilePath
   | History
   | Term String
@@ -147,6 +149,16 @@ runREPL = do
             Nothing -> outputStrLn "Can't move focus, context is not set."
             Just f  ->
               liftIO $ writeIORef focus $ Just $ gotoToplevel f
+
+        Just ShowEnv ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't show environment, context is not set."
+            Just f  -> do
+              let env     = cEnv $ fConfig f
+                  -- term    = cTerm $ fConfig f
+                  -- fvs     = fvsTerm term
+                  -- usedEnv = M.filterWithKey (\k _ -> k `S.member` fvs) env
+              outputStrLn $ pprintEnv env
 
         Just notSupported -> outputStrLn $ "Command not implemented yet: " ++ show notSupported
         Nothing -> outputStrLn "Can't parse that."

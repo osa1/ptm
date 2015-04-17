@@ -166,7 +166,7 @@ pprintConfigSteps c = unlines $ iter 0 c
     iter :: Int -> Config -> [String]
     iter num (Config _env _restrs steps term) =
       let (f : r)   = lines $ HSE.prettyPrint $ termToHSE term
-          lnLen     = length $ show $ IM.size steps - 1
+          lnLen     = length $ show $ abs $ IM.size steps - 1
           numStr    = show num
           pfxdLines = ((replicate (lnLen - length numStr) ' ' ++ numStr ++ ". " ++ f) :
                        (map (replicate (lnLen + 2) ' ' ++) r))

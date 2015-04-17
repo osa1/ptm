@@ -47,18 +47,26 @@ newtype Level = Level (IM.IntMap (Env, Term, Maybe Level))
 data Focus = Focus
   { fCurLvl    :: Int
   , fPrevFocus :: Maybe Focus -- Nothing if root
-  , fTerm      :: Term
-  , fEnv       :: Env
-  , fRestrs    :: [Restriction]
-  , fSteps     :: IM.IntMap (Env, [Restriction], Term)
+  , fConfig    :: Config
   }
 
+data Config = Config
+  { cEnv    :: Env
+  , cRestrs :: [Restriction]
+    -- swap these two |
+  , cSteps  :: IM.IntMap Config
+  , cTerm   :: Term
+  }
+
+gotoToplevel :: Focus -> Focus
+gotoToplevel f@(Focus _ Nothing  _) = f
+gotoToplevel   (Focus _ (Just f) _) = gotoToplevel f
+
 initToplevel :: Term -> Env -> Focus
-initToplevel term env = Focus 0 Nothing term env [] IM.empty
+initToplevel term env = Focus 0 Nothing (Config env [] IM.empty term)
 
 runREPL :: IO ()
 runREPL = do
-    -- TODO: Do I need a state transformer?
     focus :: IORef (Maybe Focus) <- newIORef Nothing
 
     runInputT defaultSettings $ forever $ do
@@ -74,29 +82,34 @@ runREPL = do
             Right tm' -> do
               outputStrLn "Term parsed:"
               outputStrLn (HSE.prettyPrint $ termToHSE tm')
-              f <- liftIO $ readIORef focus
-              case f of
+              liftIO $ readIORef focus >>= \case
                 Nothing ->
                   liftIO $ writeIORef focus (Just $ initToplevel tm' M.empty)
-                Just Focus{fEnv=env} ->
+                Just f -> do
+                  let f' = gotoToplevel f
                   -- FIXME: get toplevel env here
-                  liftIO $ writeIORef focus (Just $ initToplevel tm' env)
+                  liftIO $ writeIORef focus (Just $ initToplevel tm' (cEnv $ fConfig f'))
 
         -- FIXME: Driver should take restrictions into account...
         Just Step -> do
           liftIO (readIORef focus) >>= \case
             Nothing -> outputStrLn "What am I supposed to drive? (set a term using `term` command)"
-            Just f@Focus{fTerm=term, fEnv=env, fSteps=steps} -> do
+            Just f  -> do
+              let Config env restrs _steps term = fConfig f
               case step env term of
                 Transient term' ->
                   -- Should I really update an old state here? When is this old
                   -- state not empty?
                   liftIO $ writeIORef focus $
-                    Just f{fSteps=IM.insert 0 (env, fRestrs f, term') steps}
-                Split terms     ->
+                    Just f{fConfig=Config env restrs
+                            (IM.singleton 0 (Config env restrs IM.empty term')) term}
+                Split terms     -> do
+                  -- FIXME: Env should be updated in lets and cases
+                  let steps =
+                        IM.fromList $ zip [0..] $
+                          map (\(restrs', term') -> Config env restrs' IM.empty term') terms
                   liftIO $ writeIORef focus $
-                    Just f{fSteps=IM.fromList $ zip [0..] $
-                                    map (\(restrs, term') -> (env, restrs, term')) terms}
+                    Just f{fConfig=Config env restrs steps term}
                 Stuck           ->
                   outputStrLn "Can't take any steps..."
 
@@ -114,10 +127,18 @@ printFocus Nothing = do
     outputStrLn "Nothing in focus."
     outputStrLn "Load an environment using Load command."
     outputStrLn "Set focused term using Term command."
-printFocus (Just f) = do
-    outputStrLn $ "Current level: " ++ show (fCurLvl f)
-    outputStrLn "Term:"
-    outputStrLn $ HSE.prettyPrint $ termToHSE (fTerm f)
-    forM_ (IM.toList $ fSteps f) $ \(i, (_, _, t)) ->
-      outputStrLn $
-        ($ "") . PP.displayS . PP.renderPretty 1 10000 . PP.indent 2 . PP.string . HSE.prettyPrint . termToHSE $ t
+printFocus (Just (Focus lvl _ c)) = do
+    outputStrLn $ "Current level: " ++ show lvl
+    outputStrLn $ pprintConfigSteps c
+
+pprintConfigSteps :: Config -> String
+pprintConfigSteps c = unlines $ iter 0 c
+  where
+    iter :: Int -> Config -> [String]
+    iter num (Config _env _restrs steps term) =
+      let (f : r)   = lines $ HSE.prettyPrint $ termToHSE term
+          lnLen     = (length $ show $ IM.size steps) + 2
+          numStr    = show num
+          pfxdLines = ((replicate (lnLen - length numStr - 2) ' ' ++ numStr ++ ". " ++ f) : r)
+          stepLines = concatMap (map ("  " ++) . uncurry iter) $ IM.toList steps
+       in pfxdLines ++ stepLines

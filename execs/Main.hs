@@ -30,7 +30,8 @@ main = do
 
 data REPLCmd
   = Step
-  | MoveFocus Int
+  | Move Int
+  | Up
   | TopLevel
   | Load FilePath
   | History
@@ -59,10 +60,15 @@ data Config = Config
   , cTerm   :: Term
   }
 
+goTop :: Focus -> Focus
+goTop f@(Focus _ _ Nothing  _) = f
+goTop   (Focus _ i (Just f@(Focus _ _ _ cUp)) c) =
+    f{fConfig = cUp{cSteps = IM.insert i c (cSteps cUp)}}
+
+
 gotoToplevel :: Focus -> Focus
 gotoToplevel f@(Focus _ _ Nothing  _) = f
-gotoToplevel   (Focus _ i (Just f@(Focus _ _ _ cUp)) c) =
-    gotoToplevel f{fConfig = cUp{cSteps = IM.insert i c (cSteps cUp)}}
+gotoToplevel f@(Focus _ _ Just{} _)   = gotoToplevel (goTop f)
 
 initToplevel :: Term -> Env -> Focus
 initToplevel term env = Focus 0 0 Nothing (Config env [] IM.empty term)
@@ -121,7 +127,7 @@ runREPL = do
             Right env ->
               liftIO $ writeIORef focus $ Just $ initToplevel (Value $ Data "()" []) (M.fromList env)
 
-        Just (MoveFocus i) ->
+        Just (Move i) ->
           liftIO (readIORef focus) >>= \case
             Nothing -> outputStrLn "Can't move focus, context is not set."
             Just f@(Focus curLvl _ _ (Config _ _ steps _)) ->
@@ -129,6 +135,11 @@ runREPL = do
                 Nothing -> outputStrLn "Can't move focus: No such context."
                 Just conf ->
                   liftIO $ writeIORef focus $ Just $ Focus (curLvl + 1) i (Just f) conf
+
+        Just Up ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't move focus, context is not set."
+            Just f -> liftIO $ writeIORef focus $ Just $ goTop f
 
         Just TopLevel ->
           liftIO (readIORef focus) >>= \case

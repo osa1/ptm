@@ -2,6 +2,7 @@
 -- print.
 module CoreLike.ToHSE where
 
+import Data.List (foldl')
 import qualified Language.Haskell.Exts as HSE
 
 import CoreLike.Syntax
@@ -36,8 +37,8 @@ valueToHSE (Lambda var rhs) =
       body -> HSE.Lambda dummyLoc [HSE.PVar (HSE.Ident var)] body
 valueToHSE (Data con args) =
     -- FIXME: Handle special symbols
-    foldr (\arg f -> HSE.App f (HSE.Var (HSE.UnQual (HSE.Ident arg))))
-          (HSE.Con (HSE.UnQual (HSE.Ident con))) args
+    foldl' (\f arg -> HSE.App f (HSE.Var (HSE.UnQual (HSE.Ident arg))))
+           (HSE.Con (HSE.UnQual (HSE.Ident con))) args
 valueToHSE (Literal (Int i)) = HSE.Lit (HSE.Int i)
 valueToHSE (Literal (Char c)) = HSE.Lit (HSE.Char c)
 -- valueToHSE ind@Indirect{} = error $ "Can't translate Indirects to HSE: " ++ show ind

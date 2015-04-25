@@ -15,8 +15,7 @@ import CoreLike.ToHSE
 type Env = M.Map Var Term
 
 data Restriction
-  = Subst Var Term
-  | NEq Var (Either DataCon Literal) -- TODO: Use this in default branches.
+  = NEq Var (Either DataCon Literal) -- TODO: Use this in default branches.
   deriving (Show)
 
 data Step a
@@ -71,6 +70,19 @@ step env (PrimOp op args) =
             Split ts'     -> Split $ map (second (t :)) ts'
             Stuck         -> Stuck
 
+step _ (Case (LetRec binds (Value (Data con args))) cases) =
+    case findBranch cases of
+      -- FIXME: We may need renaming here
+      Just (bs, t) -> Transient (LetRec binds (substTerms (zip bs (map Var args)) t))
+      Nothing      -> Stuck
+  where
+    findBranch :: [(AltCon, Term)] -> Maybe ([Var], Term)
+    findBranch [] = Nothing
+    findBranch ((DataAlt con' args', rhs) : rest)
+      | con == con' = Just (args', rhs)
+      | otherwise   = findBranch rest
+    findBranch (_ : rest) = findBranch rest
+
 step _   (Case d@(Value (Data con args)) cases) = findBranch cases
   where
     findBranch :: [(AltCon, Term)] -> Step Term
@@ -78,11 +90,11 @@ step _   (Case d@(Value (Data con args)) cases) = findBranch cases
                                -- TODO: Is this possible when cases are exhaustive?
                                --       (Maybe with GADTs?)
     findBranch ((DataAlt con' args' , rhs) : rest)
-      | con == con' = Split [(zipWith (\v v' -> Subst v (Var v')) args args', rhs)]
+      | con == con' = Transient (substTerms (zip args' $ map Var args) rhs)
       | otherwise   = findBranch rest
     findBranch ((LiteralAlt{}       , _  ) : rest) = findBranch rest
     findBranch ((DefaultAlt Nothing , rhs) : _   ) = Transient rhs
-    findBranch ((DefaultAlt (Just v), rhs) : _   ) = Split [([Subst v d], rhs)]
+    findBranch ((DefaultAlt (Just v), rhs) : _   ) = Transient (substTerm v d rhs)
 
 step _   (Case d@(Value (Literal lit)) cases) = findBranch cases
   where
@@ -93,7 +105,7 @@ step _   (Case d@(Value (Literal lit)) cases) = findBranch cases
       | lit == lit' = Transient rhs
       | otherwise   = findBranch rest
     findBranch ((DefaultAlt Nothing , rhs) : _   ) = Transient rhs
-    findBranch ((DefaultAlt (Just v), rhs) : _   ) = Split [([Subst v d], rhs)]
+    findBranch ((DefaultAlt (Just v), rhs) : _   ) = Transient (substTerm v d rhs)
 
 step _   (Case Value{} _) = Stuck
 step env (Case scrt cases) =
@@ -133,7 +145,7 @@ step env (LetRec binders body) =
 
     iterBs :: Env -> [(Var, Term)] -> Step [(Var, Term)]
     iterBs _ [] = Stuck
-    iterBs env ((v, t) : bs) =
+    iterBs _ ((v, t) : bs) =
       case step (M.insert v t env) t of
         Transient t' -> Transient ((v, t') : bs)
         Split ts     -> Split $ map (\(restrs, t') -> (restrs, (v, t') : bs)) ts

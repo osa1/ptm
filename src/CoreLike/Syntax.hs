@@ -1,6 +1,7 @@
 module CoreLike.Syntax where
 
 import Control.Arrow (second)
+import Data.List (foldl')
 import qualified Data.Set as S
 
 type Var = String
@@ -90,6 +91,9 @@ substTerm v' t' lr@(LetRec binds rhs) =
     if v' `elem` map fst binds
        then lr
        else LetRec (map (second (substTerm v' t')) binds) (substTerm v' t' rhs)
+
+substTerms :: [(Var, Term)] -> Term -> Term
+substTerms bs t = foldl' (\t1 (v, t') -> substTerm v t' t1) t bs
 
 substCase :: Var -> Term -> (AltCon, Term) -> (AltCon, Term)
 substCase v' t' alt@(DataAlt con args, rhs)

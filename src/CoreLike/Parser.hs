@@ -171,8 +171,8 @@ list ts = do
     -- generate names for terms, if term is already a value, return itself in vars
     (lets, vars) <- termLets ts
     -- generate cons pairs as lets
-    conses@((h, _) : _) <- consLets vars
-    return $ LetRec (lets ++ conses) $ Var h
+    ((_, t) : conses) <- consLets vars
+    return $ LetRec (lets ++ conses) t
   where
     termLets :: [Term] -> Parser ([(Var, Term)], [Var])
     termLets [] = return ([], [])

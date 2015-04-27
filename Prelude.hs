@@ -1,4 +1,8 @@
-import Prelude ((+), return)
+{-# LANGUAGE PackageImports #-}
+
+module Prelude where
+
+import "base" Prelude (Bool (..), return, (+), (-))
 
 nil = []
 

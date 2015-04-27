@@ -25,4 +25,8 @@ simpl (LetRec binds rhs) =
     let binds'  = map (second simpl) binds
         fvs     = S.unions $ fvsTerm rhs : map (fvsTerm . snd) binds'
         binds'' = filter ((`S.member` fvs) . fst) binds'
-     in if null binds'' then simpl rhs else LetRec binds'' (simpl rhs)
+     in case simpl rhs of
+          LetRec tbs rhs' ->
+            if null (binds'' ++ tbs) then rhs' else LetRec (binds'' ++ tbs) rhs'
+          rhs' ->
+            if null binds'' then rhs' else LetRec binds'' rhs'

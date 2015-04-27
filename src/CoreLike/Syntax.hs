@@ -1,7 +1,7 @@
 module CoreLike.Syntax where
 
 import Control.Arrow (second)
-import Data.List (foldl')
+import Data.List (foldl', (\\))
 import qualified Data.Set as S
 
 type Var = String
@@ -116,3 +116,32 @@ substVal v' t' d@(Data con args)
           _        -> LetRec [(v', t')] $ Value $ Data con args
     | otherwise = Value d
 substVal _  _  l@Literal{} = Value l
+
+-- | Collect all variables used in given term, free or not.
+vars :: Term -> S.Set Var
+vars (Var v) = S.singleton v
+vars (Value (Lambda arg body)) = S.insert arg $ vars body
+vars (Value (Data _ vs)) = S.fromList vs
+vars (Value Literal{}) = S.empty
+vars (App t v) = S.insert v $ vars t
+vars (PrimOp _ args) = S.unions $ map vars args
+vars (Case t cs) = S.unions $ vars t : map altConVars (map fst cs) ++ map vars (map snd cs)
+  where
+    altConVars :: AltCon -> S.Set Var
+    altConVars (DataAlt _ vs) = S.fromList vs
+    altConVars LiteralAlt{} = S.empty
+    altConVars (DefaultAlt mv) = maybe S.empty S.singleton mv
+vars (LetRec bs rhs) = S.unions $ vars rhs : S.fromList (map fst bs) : map (vars . snd) bs
+
+vars' :: [Term] -> S.Set Var
+vars' = S.unions . map vars
+
+-- | Come up with a var that's not used in given term.
+freshInTerm :: Term -> Var
+freshInTerm t = freshFor (S.toList $ vars t)
+
+-- | Come up with a var that's not in the given list of vars.
+freshFor :: [Var] -> Var
+freshFor vs = head $ supply \\ vs
+  where
+    supply = map (('f' :) . show) [0..]

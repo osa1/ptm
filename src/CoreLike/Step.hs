@@ -42,11 +42,22 @@ step _   Value{} = Stuck
 step _   (App (Value (Lambda arg body)) var) = Transient $ substTerm arg (Var var) body
 step _   (App Value{} _) = Stuck
 step env (App t v) =
-    -- TODO: Handle: App (LetIn _ (Value Lambda{})) _ somehow.
     case step env t of
       Transient t' -> Transient $ App t' v
       Split ts     -> Split $ map (second $ flip App v) ts
-      Stuck        -> Stuck -- TODO: can we do something about the argument here?
+      Stuck        ->
+        case t of
+          LetRec bs (Value (Lambda arg body)) ->
+            -- the argument may already be bound by wrapping LetRec
+            -- if that's the case, we rename LetRec binding instead of the
+            -- argument, because we don't know what binds the argument at this
+            -- point. (to keep the implementation simple)
+            if v `elem` map fst bs
+              then let rm = freshInTerm t
+                       LetRec bs' (Value (Lambda _ body')) = substTerm v (Var rm) t
+                    in Transient $ LetRec bs' $ substTerm arg (Var v) body'
+              else Transient $ LetRec bs $ substTerm arg (Var v) body
+          _ -> Stuck
 
 step env (PrimOp op args) =
     case stepArgs args of

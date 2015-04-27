@@ -53,8 +53,18 @@ step env (App t v) =
             -- argument, because we don't know what binds the argument at this
             -- point. (to keep the implementation simple)
             if v `elem` map fst bs
-              then let rm = freshInTerm t
-                       LetRec bs' (Value (Lambda _ body')) = substTerm v (Var rm) t
+              then let
+                     rm = freshInTerm t
+
+                     renameB :: Var -> Var -> [(Var, Term)] -> [(Var, Term)]
+                     renameB v1 v2 [] = []
+                     renameB v1 v2 ((lv, t) : rest)
+                       | v1 == lv  = (v2, t) : rest
+                       | otherwise = (lv, t) : renameB v1 v2 rest
+
+                     LetRec bs' (Value (Lambda _ body')) =
+                       substTerm v (Var rm) (LetRec (renameB v rm bs) (Value (Lambda arg body)))
+
                     in Transient $ LetRec bs' $ substTerm arg (Var v) body'
               else Transient $ LetRec bs $ substTerm arg (Var v) body
           _ -> Stuck
@@ -83,8 +93,9 @@ step env (PrimOp op args) =
 
 step _ (Case (LetRec binds (Value (Data con args))) cases) =
     case findBranch cases of
-      -- FIXME: We may need renaming here
-      Just (bs, t) -> Transient (LetRec binds (substTerms (zip bs (map Var args)) t))
+      Just (bs, t) ->
+        -- FIXME: Do we need renaming here?
+        Transient (LetRec binds (LetRec (zip bs (map Var args)) t))
       Nothing      -> Stuck
   where
     findBranch :: [(AltCon, Term)] -> Maybe ([Var], Term)

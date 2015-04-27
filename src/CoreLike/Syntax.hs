@@ -140,8 +140,17 @@ vars' = S.unions . map vars
 freshInTerm :: Term -> Var
 freshInTerm t = freshFor (S.toList $ vars t)
 
+-- | Cope up with an infinite list of vars that are not used in given term.
+freshVarsInTerm :: Term -> [Var]
+freshVarsInTerm t = freshVarsFor (S.toList $ vars t)
+
 -- | Come up with a var that's not in the given list of vars.
 freshFor :: [Var] -> Var
-freshFor vs = head $ supply \\ vs
+freshFor vs = head $ freshVarsFor vs
+
+-- | Come up with an infinite list of vars that are not in the given list of
+-- vars.
+freshVarsFor :: [Var] -> [Var]
+freshVarsFor vs = supply \\ vs
   where
     supply = map (('f' :) . show) [0..]

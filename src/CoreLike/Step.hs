@@ -9,6 +9,7 @@ import qualified Language.Haskell.Exts as HSE
 import qualified Text.PrettyPrint.Leijen as PP
 
 import CoreLike.Parser
+import CoreLike.Simplify
 import CoreLike.Syntax
 import CoreLike.ToHSE
 
@@ -16,7 +17,7 @@ type Env = M.Map Var Term
 
 data Restriction
   = NEq Var (Either DataCon Literal) -- TODO: Use this in default branches.
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Step a
   = Transient a
@@ -24,7 +25,7 @@ data Step a
   | Stuck -- Reason
           -- TODO: we may want to do something different depending on whether
           -- we're stuck because the term is already a value or not
-  deriving (Show, Functor)
+  deriving (Show, Eq, Functor)
 
 -- TODO: Should we keep stepping subexpressions when a term is stuck because of
 --       a type error?
@@ -94,7 +95,9 @@ step env (PrimOp op args) =
 step _ (Case (LetRec binds (Value (Data con args))) cases) =
     case findBranch cases of
       Just (bs, t) ->
-        -- FIXME: Do we need renaming here?
+        -- We don't need renaming here, because the worst that can happen is we
+        -- can shadow some variables, which is OK. Simplification step takes care
+        -- of those when merging nested letrecs.
         Transient (LetRec binds (LetRec (zip bs (map Var args)) t))
       Nothing      -> Stuck
   where
@@ -176,6 +179,14 @@ step env (LetRec binders body) =
             Transient bs' -> Transient ((v, t) : bs')
             Split bss     -> Split $ map (\(restrs, bs') -> (restrs, (v, t) : bs')) bss
             Stuck         -> Stuck
+
+-- | Jump through transient steps.
+stepTransient :: Env -> Term -> Term
+stepTransient env t =
+    let t' = simpl t in
+    case step env t' of
+      Transient t'' -> stepTransient env t''
+      _notTrans -> t'
 
 -- TODO: Reduce boilerplate here
 stepPrimOp :: PrimOp -> [Value] -> Step Term

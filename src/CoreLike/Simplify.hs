@@ -2,7 +2,6 @@ module CoreLike.Simplify (simpl) where
 
 import Control.Arrow (second)
 import Data.List (intersect)
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 
 import CoreLike.Syntax
@@ -63,11 +62,6 @@ simpl (LetRec binds rhs) =
 
                    renamings' :: [(Var, Term)]
                    renamings' = map (second Var) renamings
-
-                   renameWBinders :: [(Var, Term)] -> [(Var, Var)] -> [(Var, Term)]
-                   renameWBinders [] _ = []
-                   renameWBinders ((v, t) : br) rns =
-                     (fromMaybe v (lookup v rns), substTerms renamings' t) : renameWBinders br rns
                  in
                    simplBinds
                      (binds'' ++ renameWBinders tbs renamings)

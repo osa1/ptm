@@ -1,7 +1,8 @@
 module CoreLike.Syntax where
 
 import Control.Arrow (second)
-import Data.List (foldl', (\\))
+import Data.List (foldl', intersect, (\\))
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 
 type Var = String
@@ -89,13 +90,27 @@ substTerm v' t' (PrimOp op ts) = PrimOp op $ map (substTerm v' t') ts
 substTerm v' t' (Case t cases) = Case (substTerm v' t' t) (map (substCase v' t') cases)
 substTerm v' t' lr@(LetRec binds rhs) =
     if v' `elem` map fst binds
-       then lr
-       else LetRec (map (second (substTerm v' t')) binds) (substTerm v' t' rhs)
+      then lr
+      else
+        let
+           t'fvs = S.toList $ fvsTerm t'
+           renamings = zip
+             -- free variables in t' that will be bound after substitutions
+             (intersect (map fst binds) t'fvs)
+             -- fresh names given to binders of t'fvs
+             (freshVarsInTerm lr)
+           binds' = renameWBinders binds renamings
+           -- TODO: `map (second Var) renamings` parts is generated multiple
+           -- times. (also in Simplify)
+           rhs'   = substTerms (map (second Var) renamings) rhs
+         in
+           LetRec (map (second (substTerm v' t')) binds') (substTerm v' t' rhs')
 
 substTerms :: [(Var, Term)] -> Term -> Term
 substTerms bs t = foldl' (\t1 (v, t') -> substTerm v t' t1) t bs
 
 substCase :: Var -> Term -> (AltCon, Term) -> (AltCon, Term)
+-- FIXME: implement renaming
 substCase v' t' alt@(DataAlt con args, rhs)
     | v' `elem` args = alt
     | otherwise = (DataAlt con args, substTerm v' t' rhs)
@@ -108,7 +123,11 @@ substCase v' t' alt@(DefaultAlt (Just v), rhs)
 substVal :: Var -> Term -> Value -> Term
 substVal v' t' l@(Lambda v t)
     | v == v'   = Value l
-    | otherwise = Value $ Lambda v (substTerm v' t' t)
+    | v `S.member` fvsTerm t' =
+        let vf = freshInTerm (Value l)
+         in substVal v' t' (Lambda vf (substTerm v (Var vf) t))
+    | otherwise =
+        Value $ Lambda v (substTerm v' t' t)
 substVal v' t' d@(Data con args)
     | v' `elem` args =
         case t' of
@@ -116,6 +135,11 @@ substVal v' t' d@(Data con args)
           _        -> LetRec [(v', t')] $ Value $ Data con args
     | otherwise = Value d
 substVal _  _  l@Literal{} = Value l
+
+renameWBinders :: [(Var, Term)] -> [(Var, Var)] -> [(Var, Term)]
+renameWBinders [] _ = []
+renameWBinders ((v, t) : br) rns =
+  (fromMaybe v (lookup v rns), substTerms (map (second Var) rns) t) : renameWBinders br rns
 
 -- | Collect all variables used in given term, free or not.
 vars :: Term -> S.Set Var

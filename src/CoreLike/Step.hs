@@ -168,7 +168,7 @@ step env (LetRec binders body) =
     iterBs :: Env -> [(Var, Term)] -> Step [(Var, Term)]
     iterBs _ [] = Stuck
     iterBs _ ((v, t) : bs) =
-      case step (M.insert v t env) t of
+      case step env' t of
         Transient t' -> Transient ((v, t') : bs)
         Split ts     -> Split $ map (\(restrs, t') -> (restrs, (v, t') : bs)) ts
         Stuck        ->

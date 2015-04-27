@@ -8,6 +8,7 @@ import Control.Monad.State.Strict
 import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 
+import CoreLike.Simplify
 import CoreLike.Syntax
 
 data ParserState = ParserState
@@ -49,7 +50,7 @@ parseTerm :: String -> Either String Term
 parseTerm str =
     case HSE.parseExp str of
       HSE.ParseOk hse ->
-         runExcept (evalStateT (unwrapParser $ transformExp hse) initParserState)
+        runExcept (evalStateT (unwrapParser $ transformExp hse) initParserState)
       HSE.ParseFailed loc err ->
         Left $ "fromParseResult: Parse failed at [" ++ HSE.srcFilename loc
                  ++ "] (" ++ show (HSE.srcLine loc) ++ ":" ++ show (HSE.srcColumn loc) ++ "): " ++ err
@@ -76,12 +77,27 @@ transformRhs (HSE.UnGuardedRhs e) = transformExp e
 
 transformExp :: HSE.Exp -> Parser Term
 transformExp (HSE.Var qname) = Var <$> transformQName qname
-transformExp (HSE.Con qname) = fmap Var $ transformQName qname >>= conFunctionName
+transformExp (HSE.Con qname) = (Value . flip Data []) <$> transformQName qname
 transformExp (HSE.Lit lit) = Value <$> transformLit lit
+
 transformExp (HSE.App e1 e2) = do
     e1' <- transformExp e1
     e2' <- transformExp e2
-    introLet e2' $ \v -> return $ App e1' v
+    tm <- introLet e2' $ \v -> return $ App e1' v
+    -- make sure we're not returning App for a saturated constructor
+    -- application. we should return a Value for that.
+    let tm' = simpl tm
+    case collectConArgs tm' of
+      Just (c, args) -> return $ Value $ Data c args
+      Nothing        -> return tm'
+  where
+    collectConArgs :: Term -> Maybe (DataCon, [Var])
+    collectConArgs (App f a) = do
+      (c, as) <- collectConArgs f
+      return (c, as ++ [a])
+    collectConArgs (Value (Data con args)) = return (con, args)
+    collectConArgs _notApp = Nothing
+
 transformExp (HSE.InfixApp e1 op e2) = do
     e1' <- transformExp e1
     e2' <- transformExp e2

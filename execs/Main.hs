@@ -41,6 +41,8 @@ data REPLCmd
   | Term String
   | MkSession FilePath
   | Save FilePath
+  -- Debugging stuff
+  | Repr -- ^ Print internal representation of the focused term
   deriving (Show, Eq, Read)
   -- using Read instance for parsing for now
 
@@ -159,6 +161,11 @@ runREPL = do
                   -- fvs     = fvsTerm term
                   -- usedEnv = M.filterWithKey (\k _ -> k `S.member` fvs) env
               outputStrLn $ pprintEnv env
+
+        Just Repr ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't show repr, context is not set."
+            Just f -> outputStrLn . show . cTerm . fConfig $ f
 
         Just notSupported -> outputStrLn $ "Command not implemented yet: " ++ show notSupported
         Nothing -> outputStrLn "Can't parse that."

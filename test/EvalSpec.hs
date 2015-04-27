@@ -51,7 +51,7 @@ programs =
     "sum []"
   , "sum [1, 2, 3]"
     -- foldl based sum
-  , "let sum1 = foldl (\\a b -> a + b) 0 in foldl [1, 2, 3]"
+  , "let sum1 = foldl (\\a b -> a + b) 0 in sum1 [1, 2, 3]"
     -- recursive sum
   , "sum' []"
   , "sum' [1, 2, 3]"

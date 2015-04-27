@@ -1,4 +1,4 @@
-module CoreLike.Simplify where
+module CoreLike.Simplify (simpl) where
 
 import Control.Arrow (second)
 import Data.List (intersect)
@@ -11,6 +11,7 @@ import CoreLike.Syntax
 --
 --   * Remove unused let bindings.
 --   * Flatten nested let bindings. (sometimes requires renaming binders)
+--   * Substitute let bindings in form `a = b` where b is a variable.
 --
 -- (That's all we do for now)
 --
@@ -68,7 +69,22 @@ simpl (LetRec binds rhs) =
                    renameWBinders ((v, t) : br) rns =
                      (fromMaybe v (lookup v rns), substTerms renamings' t) : renameWBinders br rns
                  in
-                   LetRec (binds'' ++ renameWBinders tbs renamings)
-                          (substTerms renamings' rhs')
+                   simplBinds
+                     (binds'' ++ renameWBinders tbs renamings)
+                     (substTerms renamings' rhs')
           rhs' ->
-            if null binds'' then rhs' else LetRec binds'' rhs'
+            if null binds'' then rhs' else simplBinds binds'' rhs'
+
+simplBinds :: [(Var, Term)] -> Term -> Term
+simplBinds bs rhs =
+    let varBs = collectVarBs bs
+        bs'   = removeBs (map fst varBs) bs
+     in substTerms varBs $ if null bs' then rhs else LetRec bs' rhs
+  where
+    collectVarBs :: [(Var, Term)] -> [(Var, Term)]
+    collectVarBs []                    = []
+    collectVarBs (b@(_, Var _) : rest) = b : collectVarBs rest
+    collectVarBs (_            : rest) = collectVarBs rest
+
+    removeBs :: [Var] -> [(Var, Term)] -> [(Var, Term)]
+    removeBs vs = filter (\(v, _) -> not (v `elem` vs))

@@ -1,7 +1,7 @@
 module CoreLike.Syntax where
 
 import Control.Arrow (second)
-import Data.List (foldl', intersect, (\\))
+import Data.List (delete, foldl', intersect, (\\))
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 
@@ -110,14 +110,31 @@ substTerms :: [(Var, Term)] -> Term -> Term
 substTerms bs t = foldl' (\t1 (v, t') -> substTerm v t' t1) t bs
 
 substCase :: Var -> Term -> (AltCon, Term) -> (AltCon, Term)
--- FIXME: implement renaming
-substCase v' t' alt@(DataAlt con args, rhs)
+substCase v' t' alt@(d@(DataAlt con args), rhs)
     | v' `elem` args = alt
-    | otherwise = (DataAlt con args, substTerm v' t' rhs)
+    | otherwise =
+        -- TODO: Test this code
+        let t'fvs      = fvsTerm t'
+            captured   = args `intersect` S.toList t'fvs
+            renamings  = zip captured (freshVarsFor $ S.toList $ altConVars d `S.union` vars rhs)
+            renamings' = map (second Var) renamings
+
+            renameBs :: [Var] -> [(Var, Var)] -> [Var]
+            renameBs []       _  = []
+            renameBs (v : vs) rs = fromMaybe v (lookup v rs) : renameBs vs rs
+         in
+           if null captured
+              then (DataAlt con args, substTerm v' t' rhs)
+              else substCase v' t' (DataAlt con (renameBs args renamings), substTerms renamings' rhs)
+
 substCase v' t' (l@LiteralAlt{}, rhs) = (l, substTerm v' t' rhs)
 substCase v' t' (DefaultAlt Nothing, rhs) = (DefaultAlt Nothing, substTerm v' t' rhs)
 substCase v' t' alt@(DefaultAlt (Just v), rhs)
     | v == v'   = alt
+    | v `elem` fvsTerm t' =
+        -- TODO: test this code
+        let newv = head $ delete v (freshVarsInTerm rhs)
+         in substCase v' t' (DefaultAlt (Just newv), substTerm v (Var newv) rhs)
     | otherwise = (DefaultAlt (Just v), substTerm v' t' rhs)
 
 substVal :: Var -> Term -> Value -> Term
@@ -150,12 +167,12 @@ vars (Value Literal{}) = S.empty
 vars (App t v) = S.insert v $ vars t
 vars (PrimOp _ args) = S.unions $ map vars args
 vars (Case t cs) = S.unions $ vars t : map altConVars (map fst cs) ++ map vars (map snd cs)
-  where
-    altConVars :: AltCon -> S.Set Var
-    altConVars (DataAlt _ vs) = S.fromList vs
-    altConVars LiteralAlt{} = S.empty
-    altConVars (DefaultAlt mv) = maybe S.empty S.singleton mv
 vars (LetRec bs rhs) = S.unions $ vars rhs : S.fromList (map fst bs) : map (vars . snd) bs
+
+altConVars :: AltCon -> S.Set Var
+altConVars (DataAlt _ vs) = S.fromList vs
+altConVars LiteralAlt{} = S.empty
+altConVars (DefaultAlt mv) = maybe S.empty S.singleton mv
 
 vars' :: [Term] -> S.Set Var
 vars' = S.unions . map vars

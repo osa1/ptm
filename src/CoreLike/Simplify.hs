@@ -71,10 +71,24 @@ simpl (LetRec binds rhs) =
 
                    renamings' :: [(Var, Term)]
                    renamings' = map (second Var) renamings
+
+                   -- second step, we rename binders in nested let that are also
+                   -- binders in outer let
+                   mergeLets :: [(Var, Term)] -> [(Var, Term)] -> Term
+                             -> ([(Var, Term)], Term)
+                   mergeLets bs1 bs2 rhs =
+                     let
+                       rs = zip (intersect (map fst bs1) (map fst bs2))
+                                -- TODO: fix this ugly hack
+                                (freshVarsInTerm (LetRec (bs1 ++ bs2)
+                                                         (Value (Literal undefined))))
+                       rs' = map (second Var) rs
+                     in
+                       (bs1 ++ renameWBinders bs2 rs, substTerms rs' rhs)
                  in
-                   simplBinds
-                     (binds'' ++ renameWBinders tbs renamings)
-                     (substTerms renamings' rhs')
+                   uncurry simplBinds
+                     (mergeLets binds'' (renameWBinders tbs renamings)
+                                (substTerms renamings' rhs'))
           rhs' ->
             if null binds'' then rhs' else simplBinds binds'' rhs'
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase, ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase, NondecreasingIndentation, ScopedTypeVariables #-}
 
 module Main where
 
@@ -9,6 +9,7 @@ import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 import Safe (readMay)
 import System.Console.Haskeline
+import System.Directory (doesFileExist)
 
 import CoreLike.Parser
 import CoreLike.Simplify
@@ -18,7 +19,9 @@ import CoreLike.Syntax
 import CoreLike.ToHSE
 
 main :: IO ()
-main = runREPL
+main = do
+    preludeExists <- doesFileExist "Prelude.hs"
+    runREPL $ if preludeExists then Just "Prelude.hs" else Nothing
 
 data REPLCmd
   = Step
@@ -75,11 +78,22 @@ gotoBottom f@(Focus curLvl _ _ (Config _ _ steps _)) =
 initToplevel :: Term -> Env -> Focus
 initToplevel term env = Focus 0 0 Nothing (Config env [] IM.empty term)
 
-runREPL :: IO ()
-runREPL = do
+runREPL :: Maybe String -> IO ()
+runREPL prelude = do
     focus :: IORef (Maybe Focus) <- newIORef Nothing
 
-    runInputT defaultSettings $ forever $ do
+    runInputT defaultSettings $ do
+
+      let load path = do
+            liftIO (parseFile path) >>= \case
+              Left err -> outputStrLn err
+              Right env ->
+                liftIO $ writeIORef focus $
+                  Just $ initToplevel (Value $ Data "()" []) (M.fromList env)
+
+      maybe (return ()) load prelude
+
+      forever $ do
       printFocus =<< liftIO (readIORef focus)
 
       input <- getInputLine "> "
@@ -130,11 +144,7 @@ runREPL = do
             Just f  ->
               liftIO $ writeIORef focus $ Just f{fConfig=step (fConfig f) n}
 
-        Just (Load path) ->
-          liftIO (parseFile path) >>= \case
-            Left err -> outputStrLn err
-            Right env ->
-              liftIO $ writeIORef focus $ Just $ initToplevel (Value $ Data "()" []) (M.fromList env)
+        Just (Load path) -> load path
 
         Just (Move i) ->
           liftIO (readIORef focus) >>= \case

@@ -58,6 +58,7 @@ even x =
 
 odd x =
   case x of
+    0 -> False
     1 -> True
     _ -> even (x - 1)
 

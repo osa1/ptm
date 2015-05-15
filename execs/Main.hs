@@ -6,35 +6,27 @@ import Control.Monad.State
 import qualified Data.IntMap as IM
 import Data.IORef
 import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Language.Haskell.Exts as HSE
 import Safe (readMay)
 import System.Console.Haskeline
-import System.Environment
-import qualified Text.PrettyPrint.Leijen as PP
 
 import CoreLike.Parser
 import CoreLike.Simplify
-import CoreLike.Step
+import CoreLike.Step hiding (step)
+import qualified CoreLike.Step as S
 import CoreLike.Syntax
 import CoreLike.ToHSE
 
 main :: IO ()
-main = do
-    runREPL
-    -- (a : _) <- getArgs
-    -- parseFile a >>= \case
-    --   Left err -> error err
-    --   Right st -> do
-    --     print st
-    --     putStrLn "\nHSE conversion and printer: ----------------"
-    --     putStrLn $ HSE.prettyPrint (hseModule st)
+main = runREPL
 
 data REPLCmd
   = Step
+  | Steps Int
   | Move Int
   | Up
   | TopLevel
+  | Bottom
   | ShowEnv -- TODO: maybe only shows used used parts
   | Load FilePath
   | History
@@ -70,10 +62,15 @@ goTop f@(Focus _ _ Nothing  _) = f
 goTop   (Focus _ i (Just f@(Focus _ _ _ cUp)) c) =
     f{fConfig = cUp{cSteps = IM.insert i c (cSteps cUp)}}
 
-
 gotoToplevel :: Focus -> Focus
 gotoToplevel f@(Focus _ _ Nothing  _) = f
 gotoToplevel f@(Focus _ _ Just{} _)   = gotoToplevel (goTop f)
+
+gotoBottom :: Focus -> Focus
+gotoBottom f@(Focus curLvl _ _ (Config _ _ steps _)) =
+    case IM.toList steps of
+      [(_, c)] -> gotoBottom (Focus (curLvl + 1) 0 (Just f) c)
+      _        -> f
 
 initToplevel :: Term -> Env -> Focus
 initToplevel term env = Focus 0 0 Nothing (Config env [] IM.empty term)
@@ -109,7 +106,7 @@ runREPL = do
             Nothing -> outputStrLn "What am I supposed to drive? (set a term using `term` command)"
             Just f  -> do
               let Config env restrs _steps term = fConfig f
-              case fmap simpl $ step env term of
+              case fmap simpl $ S.step env term of
                 Transient term' ->
                   -- Should I really update an old state here? When is this old
                   -- state not empty?
@@ -125,6 +122,13 @@ runREPL = do
                     Just f{fConfig=Config env restrs steps term}
                 Stuck           ->
                   outputStrLn "Can't take any steps..."
+
+        Just (Steps n) -> do
+          liftIO (readIORef focus) >>= \case
+            Nothing ->
+              outputStrLn "What am I supposed to drive? (set a term using `term` command)"
+            Just f  ->
+              liftIO $ writeIORef focus $ Just f{fConfig=step (fConfig f) n}
 
         Just (Load path) ->
           liftIO (parseFile path) >>= \case
@@ -152,6 +156,12 @@ runREPL = do
             Just f  ->
               liftIO $ writeIORef focus $ Just $ gotoToplevel f
 
+        Just Bottom ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't move focus, context is not set."
+            Just f ->
+              liftIO $ writeIORef focus $ Just $ gotoBottom f
+
         Just ShowEnv ->
           liftIO (readIORef focus) >>= \case
             Nothing -> outputStrLn "Can't show environment, context is not set."
@@ -169,6 +179,21 @@ runREPL = do
 
         Just notSupported -> outputStrLn $ "Command not implemented yet: " ++ show notSupported
         Nothing -> outputStrLn "Can't parse that."
+
+step :: Config -> Int -> Config
+step c 0 = c
+step c@(Config env restrs _steps term) n =
+    case fmap simpl $ S.step env term of
+      Transient term' ->
+        Config env restrs
+          (IM.singleton 0 (step (Config env restrs IM.empty term') (n - 1))) term
+      Split terms ->
+        let steps =
+              IM.fromList $ zip [0..] $
+                map (\(restrs', term') -> step (Config env restrs' IM.empty term') (n - 1))
+                    terms
+        in Config env restrs steps term
+      Stuck -> c
 
 printFocus :: MonadIO m => Maybe Focus -> InputT m ()
 printFocus Nothing = do

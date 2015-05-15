@@ -63,4 +63,10 @@ programs =
   , "odd 1"
   , "even 10"
   , "odd 9"
+
+  , "length []"
+  , "length (map f [])" -- an open term that should terminate
+
+  , "span f []" -- another open term, should terminate
+  , "span odd [1,2,3]"
   ]

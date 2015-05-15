@@ -25,9 +25,18 @@ simpl (App f args)       = App (simpl f) args
 simpl (PrimOp op args)   = PrimOp op (map simpl args)
 simpl (Case scrt alts)   = Case (simpl scrt) (map (second simpl) alts)
 simpl (LetRec binds rhs) =
-    let binds'  = map (second simpl) binds
-        fvs     = S.unions $ fvsTerm rhs : map (fvsTerm . snd) binds'
-        binds'' = filter ((`S.member` fvs) . fst) binds'
+    let
+      closure_iter, closure :: S.Set Var -> S.Set Var
+      closure_iter vs = S.unions . (vs :) $
+                          map (fvsTerm . snd) $ filter ((`S.member` vs) . fst) binds
+
+      closure vs =
+        let c = closure_iter vs
+         in if S.size vs == S.size c then vs else closure c
+
+      binds'  = map (second simpl) binds
+      fvs     = closure (fvsTerm rhs)
+      binds'' = filter ((`S.member` fvs) . fst) binds'
      in case simpl rhs of
           r@(LetRec tbs rhs') ->
             -- We should be careful with renamings here. Example:

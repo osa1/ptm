@@ -41,6 +41,7 @@ step env (Var v) = maybe Stuck Transient $ M.lookup v env
 step _   Value{} = Stuck
 
 step _   (App (Value (Lambda arg body)) var) = Transient $ substTerm arg (Var var) body
+step _   (App (Value (Data con args)) var) = Transient $ Value $ Data con (args ++ [var])
 step _   (App Value{} _) = Stuck
 step env (App t v) =
     case step env t of
@@ -64,10 +65,12 @@ step env (App t v) =
                        | otherwise = (lv, t) : renameB v1 v2 rest
 
                      LetRec bs' (Value (Lambda _ body')) =
-                       substTerm v (Var rm) (LetRec (renameB v rm bs) (Value (Lambda arg body)))
-
+                       substTerm v (Var rm) (LetRec (renameB v rm bs)
+                                                    (Value (Lambda arg body)))
                     in Transient $ LetRec bs' $ substTerm arg (Var v) body'
               else Transient $ LetRec bs $ substTerm arg (Var v) body
+          LetRec bs (Value (Data con args)) ->
+            Transient $ LetRec bs (Value (Data con (args ++ [v])))
           _ -> Stuck
 
 step env (PrimOp op args) =

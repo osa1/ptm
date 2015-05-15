@@ -29,10 +29,12 @@ spec :: Spec
 spec = do
     describe "evaluation" $ do
       env <- (M.fromList . fromRight) <$> runIO (parseFile "Prelude.hs")
-      fromHUnitTest $ TestList $ map (\p -> TestLabel p $ TestCase (bigStepNoSplit env p)) programs
+      fromHUnitTest $ TestList $
+        map (\p -> TestLabel p $ TestCase (bigStepNoSplit env p)) programs
 
 isValue :: Term -> Assertion
-isValue (Value _) = return ()
+isValue Value{} = return ()
+isValue (LetRec _ Value{}) = return ()
 isValue notVal    = assertFailure (show notVal ++ " is not a value.")
 
 bigStepNoSplit :: Env -> String -> Assertion
@@ -66,6 +68,8 @@ programs =
 
   , "length []"
   , "length (map f [])" -- an open term that should terminate
+  , "map f [1, 2, 3]"
+  , "length (map f [1, 2, 3])"
 
   , "span f []" -- another open term, should terminate
   , "span odd [1,2,3]"

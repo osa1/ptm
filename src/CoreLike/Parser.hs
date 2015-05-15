@@ -125,7 +125,16 @@ transformExp (HSE.Case e alts) = Case <$> transformExp e <*> mapM transformAlt a
 transformExp (HSE.List es) = list =<< mapM transformExp es
 transformExp (HSE.Let (HSE.BDecls decls) body) =
     LetRec <$> mapM transformDecl decls <*> transformExp body
+transformExp (HSE.Tuple _ args) = do
+    args' <- mapM transformExp args
+    iter [] args'
+  where
+    iter ns [a]      = introLet a (\v -> return $ Value $ mkTuple (reverse (v : ns)))
+    iter ns (a : as) = introLet a (\v -> iter (v : ns) as)
 transformExp e = throwError $ "Unsupported exp: " ++ show e
+
+mkTuple :: [Var] -> Value
+mkTuple vs = Data ('(' : replicate (length vs) ',' ++ ")") vs
 
 -- | Introduce a let-binding for the term. Combines 'LetRec's returned by term
 -- builder.
@@ -144,7 +153,8 @@ elimBinds bs t = LetRec bs t
 collectArgs :: [HSE.Pat] -> Parser [Var]
 collectArgs [] = return []
 collectArgs (HSE.PVar v : ps) = (nameVar v :) <$> collectArgs ps
-collectArgs (p : _) = throwError $ "Unsupported pattern in function arguments: " ++ show p
+collectArgs (p : _) =
+    throwError $ "collectArgs: Unsupported pattern in function arguments: " ++ show p
 
 transformAlt :: HSE.Alt -> Parser (AltCon, Term)
 transformAlt (HSE.Alt _ pat rhs _) = (,) <$> transformPat pat <*> transformRhs rhs
@@ -162,11 +172,16 @@ transformPat (HSE.PInfixApp p1 op p2) = do
 transformPat (HSE.PList []) = return $ DataAlt "[]" []
 transformPat (HSE.PLit _sign lit) = transformLitPat lit
 transformPat HSE.PWildCard = DefaultAlt . Just <$> freshVar
-transformPat p = throwError $ "Unsupported pattern: " ++ show p
+transformPat (HSE.PTuple _boxed pats) = do
+    let con = '(' : replicate (length pats) ',' ++ ")"
+    args <- collectArgs pats
+    return $ DataAlt con args
+transformPat p = throwError $ "transformPat: Unsupported pattern: " ++ show p
 
 transformLitPat :: HSE.Literal -> Parser AltCon
 transformLitPat (HSE.Int i) = return $ LiteralAlt (Int i)
-transformLitPat l = throwError $ "Unsupported literal pattern: " ++ show l
+transformLitPat l =
+    throwError $ "Unsupported literal pattern: " ++ show l
 
 -- | Return function name for the data constructor, if data constructor is
 -- known, otherwise fail.

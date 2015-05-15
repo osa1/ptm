@@ -4,6 +4,11 @@ module Prelude where
 
 import "base" Prelude (Bool (..), return, (+), (-))
 
+------------------------
+-- Constructor functions
+
+cons a b = a : b
+
 nil = []
 
 map f l =
@@ -15,7 +20,7 @@ filter p l =
   case l of
     [] -> []
     h : t -> if p h then h : (filter p t)
-                      else filter p t
+                    else filter p t
 
 foldl f i l =
   case l of
@@ -55,3 +60,20 @@ odd x =
   case x of
     1 -> True
     _ -> even (x - 1)
+
+length x =
+  case x of
+    [] -> 0
+    _a : rest -> 1 + length rest
+
+span p l =
+  case l of
+    [] -> ([], [])
+    x : xs ->
+      if p x
+        then
+         case span p xs of
+           (p, r) -> (x : p, r)
+        else ([], l)
+
+example = span odd [1,2,3]

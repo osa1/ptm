@@ -28,6 +28,7 @@ data REPLCmd
   | Steps Int
   | Move Int
   | Up
+  | Down
   | TopLevel
   | Bottom
   | ShowEnv -- TODO: maybe only shows used used parts
@@ -60,14 +61,20 @@ data Config = Config
   , cTerm   :: Term
   }
 
-goTop :: Focus -> Focus
-goTop f@(Focus _ _ Nothing  _) = f
-goTop   (Focus _ i (Just f@(Focus _ _ _ cUp)) c) =
+goUp :: Focus -> Focus
+goUp f@(Focus _ _ Nothing  _) = f
+goUp   (Focus _ i (Just f@(Focus _ _ _ cUp)) c) =
     f{fConfig = cUp{cSteps = IM.insert i c (cSteps cUp)}}
+
+goDown :: Focus -> Focus
+goDown f@(Focus curLvl _ _ (Config _ _ steps _))
+  | IM.size steps /= 1 = f
+  | otherwise          =
+      Focus (curLvl + 1) 0 (Just f) (snd . head $ IM.toList steps)
 
 gotoToplevel :: Focus -> Focus
 gotoToplevel f@(Focus _ _ Nothing  _) = f
-gotoToplevel f@(Focus _ _ Just{} _)   = gotoToplevel (goTop f)
+gotoToplevel f@(Focus _ _ Just{} _)   = gotoToplevel (goUp f)
 
 gotoBottom :: Focus -> Focus
 gotoBottom f@(Focus curLvl _ _ (Config _ _ steps _)) =
@@ -158,7 +165,12 @@ runREPL prelude = do
         Just Up ->
           liftIO (readIORef focus) >>= \case
             Nothing -> outputStrLn "Can't move focus, context is not set."
-            Just f -> liftIO $ writeIORef focus $ Just $ goTop f
+            Just f -> liftIO $ writeIORef focus $ Just $ goUp f
+
+        Just Down ->
+          liftIO (readIORef focus) >>= \case
+            Nothing -> outputStrLn "Can't move focus, context is not set."
+            Just f -> liftIO $ writeIORef focus $ Just $ goDown f
 
         Just TopLevel ->
           liftIO (readIORef focus) >>= \case

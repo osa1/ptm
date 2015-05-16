@@ -59,7 +59,7 @@ step env (App t v) =
                      rm = freshInTerm t
 
                      renameB :: Var -> Var -> [(Var, Term)] -> [(Var, Term)]
-                     renameB v1 v2 [] = []
+                     renameB _ _ [] = []
                      renameB v1 v2 ((lv, t) : rest)
                        | v1 == lv  = (v2, t) : rest
                        | otherwise = (lv, t) : renameB v1 v2 rest

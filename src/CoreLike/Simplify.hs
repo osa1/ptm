@@ -92,11 +92,27 @@ simpl (LetRec binds rhs) =
           rhs' ->
             if null binds'' then rhs' else simplBinds binds'' rhs'
 
+-- | Remove bindings in form `a = b` where b is a variable by inlining.
 simplBinds :: [(Var, Term)] -> Term -> Term
 simplBinds bs rhs =
     let varBs = collectVarBs bs
         bs'   = removeBs (map fst varBs) bs
-     in substTerms varBs $ if null bs' then rhs else LetRec bs' rhs
+     in
+       -- We need to be careful with the substitution here. if we do this:
+       --
+       --   substTerms varBs (LetRec bs' rhs)
+       --
+       -- It may try to rename some of the binders to avoid variable capturing,
+       -- but renaming is exactly what we should avoid here. Example:
+       --
+       --   let v25 = (:) v1 nil
+       --       v22 = v25
+       --    in (:) v0 v22
+       --
+       -- We try to do [v25\v22], but `v25` is a open term and `v25` is free in
+       -- it. So it renames `let v25 = ...` part.
+       if null bs' then substTerms varBs rhs
+                   else LetRec (map (second $ substTerms varBs) bs') (substTerms varBs rhs)
   where
     collectVarBs :: [(Var, Term)] -> [(Var, Term)]
     collectVarBs []                    = []

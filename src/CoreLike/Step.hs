@@ -5,6 +5,8 @@ module CoreLike.Step where
 import Control.Arrow (second)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
+import qualified Data.Set as S
 import qualified Language.Haskell.Exts as HSE
 import qualified Text.PrettyPrint.Leijen as PP
 
@@ -95,13 +97,44 @@ step env (PrimOp op args) =
             Split ts'     -> Split $ map (second (t :)) ts'
             Stuck         -> Stuck
 
-step _ (Case (LetRec binds (Value (Data con args))) cases) =
+step _ pt@(Case (LetRec binds (Value (Data con args))) cases) =
     case findBranch cases of
       Just (bs, t) ->
-        -- We don't need renaming here, because the worst that can happen is we
-        -- can shadow some variables, which is OK. Simplification step takes care
-        -- of those when merging nested letrecs.
-        Transient (LetRec binds (LetRec (zip bs (map Var args)) t))
+        -- We need to be careful with capturing here. Example:
+        --
+        --   let v2 = 1
+        --       v1 = 2
+        --       v0 = 3
+        --       v25 = (:) v2 nil
+        --     in
+        --     case let v25 = (:) v1 nil in (:) v0 v25 of
+        --         [] -> v25
+        --         x : xs -> let v22 = append xs v25 in (:) x v22
+        --
+        -- After this step, a variable is captured here like this:
+        --
+        --   let v2 = 1
+        --       v1 = 2
+        --       v0 = 3
+        --       v25 = (:) v2 nil
+        --     in
+        --     let v25 = (:) v1 nil in
+        --       let x = v0
+        --           xs = v25
+        --         in let v22 = append xs v25 in (:) x v22
+        -- -------------------------------^^^ captured
+        --
+        -- FIXME: This is getting tedious. Maybe use environments and generate
+        -- lets when printing, or push lets to top level as much as possible
+        -- etc.
+        --
+        let captured = S.fromList (map fst binds) `S.intersection` fvsTerm t
+            -- at this point we can rename bindings in parent or nested let
+            -- let's just rename nested one
+            renamings = zip (S.toList captured) (freshVarsInTerm pt)
+            binds' = renameWBinders binds renamings
+            args'  = map (\a -> fromMaybe a (lookup a renamings)) args
+         in Transient (LetRec binds' (LetRec (zip bs (map Var args')) t))
       Nothing      -> Stuck
   where
     findBranch :: [(AltCon, Term)] -> Maybe ([Var], Term)

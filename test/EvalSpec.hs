@@ -73,4 +73,7 @@ programs =
 
   , "span f []" -- another open term, should terminate
   , "span odd [1,2,3]"
+
+  , "reverse []"
+  , "reverse [1, 2, 3]"
   ]

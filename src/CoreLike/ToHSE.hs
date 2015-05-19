@@ -4,6 +4,7 @@ module CoreLike.ToHSE where
 
 import Data.List (foldl')
 import qualified Language.Haskell.Exts as HSE
+import Prelude hiding (LT)
 
 import CoreLike.Syntax
 
@@ -48,14 +49,14 @@ primOpToHSE op [t1, t2] = HSE.InfixApp (termToHSE t1) (primOpToQOp op) (termToHS
 primOpToHSE op args = error $ "Can't convert PrimOp to HSE: " ++ show op ++ ", " ++ show args
 
 primOpToQOp :: PrimOp -> HSE.QOp
-primOpToQOp Add           = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "+"
-primOpToQOp Subtract      = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "-"
-primOpToQOp Multiply      = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "*"
-primOpToQOp Divide        = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "/"
-primOpToQOp Modulo        = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "%"
-primOpToQOp Equal         = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "=="
-primOpToQOp LessThan      = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<"
-primOpToQOp LessThanEqual = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<="
+primOpToQOp Add = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "+"
+primOpToQOp Sub = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "-"
+primOpToQOp Mul = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "*"
+primOpToQOp Div = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "/"
+primOpToQOp Mod = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "%"
+primOpToQOp Eq  = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "=="
+primOpToQOp LT  = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<"
+primOpToQOp LTE = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<="
 
 altToHSE :: (AltCon, Term) -> HSE.Alt
 altToHSE (con, t) =

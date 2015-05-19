@@ -7,6 +7,7 @@ import Control.Monad.Except
 import Control.Monad.State.Strict
 import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
+import Prelude hiding (LT)
 
 import CoreLike.Simplify
 import CoreLike.Syntax
@@ -43,8 +44,8 @@ prims :: M.Map HSE.QName PrimOp
 prims = M.fromList $ map (first $ HSE.UnQual . HSE.Symbol) symbols
   where
     symbols =
-      [ ("+", Add), ("-", Subtract), ("*", Multiply), ("/", Divide), ("%", Modulo),
-        ("==", Equal), ("<", LessThan), ("<=", LessThanEqual) ]
+      [ ("+", Add), ("-", Sub), ("*", Mul), ("/", Div), ("%", Mod),
+        ("==", Eq), ("<", LT), ("<=", LTE) ]
 
 parseTerm :: String -> Either String Term
 parseTerm str =

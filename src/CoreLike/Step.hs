@@ -228,11 +228,11 @@ stepTransient env t =
 stepPrimOp :: PrimOp -> [Value] -> Step Term
 stepPrimOp Add [Literal (Int i1), Literal (Int i2)] =
   Transient $ Value $ Literal $ Int $ i1 + i2
-stepPrimOp Subtract [Literal (Int i1), Literal (Int i2)] =
+stepPrimOp Sub [Literal (Int i1), Literal (Int i2)] =
   Transient $ Value $ Literal $ Int $ i1 - i2
-stepPrimOp Multiply [Literal (Int i1), Literal (Int i2)] =
+stepPrimOp Mul [Literal (Int i1), Literal (Int i2)] =
   Transient $ Value $ Literal $ Int $ i1 * i2
-stepPrimOp Divide [Literal (Int i1), Literal (Int i2)] =
+stepPrimOp Div [Literal (Int i1), Literal (Int i2)] =
   Transient $ Value $ Literal $ Int $ i1 `div` i2
 stepPrimOp _ _ = Stuck
 

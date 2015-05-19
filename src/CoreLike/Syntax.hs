@@ -9,9 +9,7 @@ type Var = String
 
 type DataCon = String
 
-data PrimOp
-  = Add | Subtract | Multiply | Divide
-  | Modulo | Equal | LessThan | LessThanEqual
+data PrimOp = Add | Sub | Mul | Div | Mod | Eq | LT | LTE
   deriving (Show, Eq, Ord)
 
 data AltCon

@@ -69,14 +69,14 @@ unwind v _ s =
 applyPrimOp :: PrimOp -> [Value] -> Value
 applyPrimOp Add [Literal (Int i1), Literal (Int i2)] =
     Literal $ Int $ i1 + i2
-applyPrimOp Subtract [Literal (Int i1), Literal (Int i2)] =
+applyPrimOp Sub [Literal (Int i1), Literal (Int i2)] =
     Literal $ Int $ i1 - i2
-applyPrimOp Multiply [Literal (Int i1), Literal (Int i2)] =
+applyPrimOp Mul [Literal (Int i1), Literal (Int i2)] =
     Literal $ Int $ i1 * i2
-applyPrimOp Divide [Literal (Int i1), Literal (Int i2)] =
+applyPrimOp Div [Literal (Int i1), Literal (Int i2)] =
     Literal $ Int $ i1 `div` i2
-applyPrimOp Modulo [Literal (Int i1), Literal (Int i2)] =
+applyPrimOp Mod [Literal (Int i1), Literal (Int i2)] =
     Literal $ Int $ i1 `mod` i2
-applyPrimOp Equal [Literal (Int i1), Literal (Int i2)] =
+applyPrimOp Eq [Literal (Int i1), Literal (Int i2)] =
     Data (if i1 == i2 then "True" else "False") []
 applyPrimOp op lits = error $ "Unhandled PrimOp " ++ show op ++ " args: " ++ show lits

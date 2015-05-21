@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections, TupleSections #-}
 
 module CoreLike.Eval where
 
@@ -6,6 +6,7 @@ import Data.List (foldl')
 import qualified Data.Map.Strict as M
 
 import CoreLike.Syntax
+import CoreLike.Parser -- testing
 
 type Env = M.Map Var Term
 
@@ -80,3 +81,13 @@ applyPrimOp Mod [Literal (Int i1), Literal (Int i2)] =
 applyPrimOp Eq [Literal (Int i1), Literal (Int i2)] =
     Data (if i1 == i2 then "True" else "False") []
 applyPrimOp op lits = error $ "Unhandled PrimOp " ++ show op ++ " args: " ++ show lits
+
+----------
+-- Testing
+
+initState :: FilePath -> IO (Either String State)
+initState path =
+    fmap ((Value $ Data "()" [], , []) . M.fromList) <$> parseFile path
+
+setTerm :: String -> State -> (Either String State)
+setTerm termStr (_, env, stack) = (, env, stack) <$> parseTerm termStr

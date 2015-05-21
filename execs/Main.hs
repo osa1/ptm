@@ -1,8 +1,9 @@
 {-# LANGUAGE LambdaCase, NondecreasingIndentation, ScopedTypeVariables #-}
 
-module Main where
+module Main (main) where
 
-import Control.Monad.State
+import Control.Monad
+import Control.Monad.IO.Class
 import qualified Data.IntMap as IM
 import Data.IORef
 import qualified Data.Map as M
@@ -41,8 +42,6 @@ data REPLCmd
   | Repr -- ^ Print internal representation of the focused term
   deriving (Show, Eq, Read)
   -- using Read instance for parsing for now
-
-newtype Level = Level (IM.IntMap (Env, Term, Maybe Level))
 
 -- Could this be implemented as a zipper for more efficiency?
 -- (or is this already a zipper?)

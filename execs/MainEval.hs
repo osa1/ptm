@@ -70,7 +70,7 @@ runREPL initSt = do
     runInputT defaultSettings $ forever $ do
       cs <- liftIO (readIORef currentState)
       -- FIXME: We should print the whole state instead.
-      maybe (return ()) (outputStrLn . pprintTerm) cs
+      maybe (return ()) (outputStrLn . pprintState) cs
       getInputLine "> " >>= \case
         Just input
           | null input -> liftIO (readIORef lastCmd) >>= runCmd
@@ -86,3 +86,12 @@ pprintTerm (term, _, _) = HSE.prettyPrint $ termToHSE term
 pprintStack :: State -> String
 pprintStack (_, _, stack) =
     PP.displayS (PP.renderPretty 0.8 100 $ PP.list (map (PP.text . show) stack)) ""
+
+pprintState :: State -> String
+pprintState (term, env, stack) = flip PP.displayS "" . PP.renderPretty 0.8 100 . PP.tupled $
+    [ PP.list $ map (\(k, v) -> PP.nest 4 (PP.text k PP.<+> PP.text "=" PP.</>
+                                             PP.string (HSE.prettyPrint (termToHSE v))))
+                    (M.toList env)
+    , PP.list $ map (PP.text . show) stack
+    , PP.string (HSE.prettyPrint $ termToHSE term)
+    ]

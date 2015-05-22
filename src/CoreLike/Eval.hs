@@ -4,6 +4,7 @@ module CoreLike.Eval where
 
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import CoreLike.Syntax
 import CoreLike.Parser -- testing
@@ -21,8 +22,52 @@ type Stack = [StackFrame]
 
 type State = (Term, Env, Stack)
 
-mapVars :: [(Var, Term)] -> Env -> Env
-mapVars = flip $ foldl' (\env (v, t) -> M.insert v t env)
+-- Note [Pushing new variables to the environment]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- We need to rename every variable before pushing them to the environment and
+-- of course update the code that uses those variables accordingly. Otherwise we
+-- end up with overriding existing variables. Example:
+--
+--   let x = ...
+--    in (\x -> ...) y
+--
+-- After the application updated `x` will be in the environment.
+--
+-- This also means that we should occasionally run garbage collection to remove
+-- unused bindings from the environment. (not strictly necessary, but not doing
+-- this makes debugging harder)
+
+-- TODO: Rename 'Env' with 'Heap'.
+-- TODO: Ideally 'Heap' should be kept abstract here, we don't want to use
+--       M.insert accidentally and ruin everything.
+-- TODO: Document why we need to pass stack to add new bindings.
+
+envVars :: Env -> S.Set Var
+envVars = M.keysSet
+
+updateVars :: Stack -> S.Set Var
+updateVars s = S.fromList [ v | Update v <- s ]
+
+-- NOTE: This updates RHSs of let bindings.
+mapVars :: [(Var, Term)] -> Env -> Stack -> Term -> (Env, Term)
+mapVars binds env stack body = (env', body')
+  where
+    freshs    = freshVarsForPfx "l_"
+                  (S.unions [envVars env, S.fromList (map fst binds),
+                             vars body, updateVars stack])
+    renamings = zip (map fst binds) (map Var freshs)
+    body'     = substTerms renamings body
+    binds'    = zipWith (\l (_, r) -> (l, substTerms renamings r)) freshs binds
+    env'      = foldl' (\e (v, t) -> M.insert v t e) env binds'
+
+-- NOTE: Doesn't update value of new variable.
+insertVar :: Var -> Term -> Env -> Stack -> Term -> (Env, Term)
+insertVar v t env stack body = (env', body')
+  where
+    fresh = head $ freshVarsFor (S.insert v $ envVars env `S.union` updateVars stack)
+    env'  = M.insert fresh t env
+    body' = substTerm v (Var fresh) body
 
 evalStep :: State -> Maybe State
 evalStep (Var v, env, stack) = (, M.delete v env, Update v : stack) <$> M.lookup v env
@@ -32,23 +77,29 @@ evalStep (PrimOp op (arg1 : args), env, stack) =
     Just (arg1, env, PrimApply op [] args : stack)
 evalStep (PrimOp op [], _, _) = error $ "evalStep: PrimOp without arguments: " ++ show op
 evalStep (Case scr cases, env, stack) = Just (scr, env, Scrutinise cases : stack)
-evalStep (LetRec binds rhs, env, stack) = Just (rhs, mapVars binds env, stack)
+evalStep (LetRec binds rhs, env, stack) =
+    let (env', rhs') = mapVars binds env stack rhs in Just (rhs', env', stack)
 
 unwind :: Value -> Env -> Stack -> Maybe State
 unwind _ _ [] = Nothing
-unwind val env (Update var : stack) = Just (Value val, M.insert var (Value val) env, stack)
+unwind val env (Update var : stack) =
+    -- it's OK to just update the env here
+    Just (Value val, M.insert var (Value val) env, stack)
 unwind (Lambda arg body) env (Apply v : stack) =
-    Just (body, M.insert arg (Var v) env, stack)
+    let (env', body') = insertVar arg (Var v) env stack body in Just (body', env', stack)
 unwind v@(Data con args) env (Scrutinise cases : stack) = findCase cases
   where
     findCase :: [(AltCon, Term)] -> Maybe State
     findCase [] = Nothing
     findCase ((DataAlt con' args', rhs) : rest)
-      | con == con' = Just (rhs, mapVars (zip args' (map Var args)) env, stack)
+      | con == con' =
+          let (env', rhs') = mapVars (zip args' (map Var args)) env stack rhs
+           in Just (rhs', env', stack)
       | otherwise   = findCase rest
     findCase ((LiteralAlt{}, _) : rest) = findCase rest
     findCase ((DefaultAlt Nothing, rhs) : _) = Just (rhs, env, stack)
-    findCase ((DefaultAlt (Just d), rhs) : _) = Just (rhs, M.insert d (Value v) env, stack)
+    findCase ((DefaultAlt (Just d), rhs) : _) =
+      let (env', rhs') = insertVar d (Value v) env stack rhs in Just (rhs', env', stack)
 unwind v@(Literal lit) env (Scrutinise cases : stack) = findCase cases
   where
     findCase :: [(AltCon, Term)] -> Maybe State
@@ -58,7 +109,8 @@ unwind v@(Literal lit) env (Scrutinise cases : stack) = findCase cases
       | lit == lit' = Just (rhs, env, stack)
       | otherwise   = findCase rest
     findCase ((DefaultAlt Nothing, rhs) : _) = Just (rhs, env, stack)
-    findCase ((DefaultAlt (Just d), rhs) : _) = Just (rhs, M.insert d (Value v) env, stack)
+    findCase ((DefaultAlt (Just d), rhs) : _) =
+      let (env', rhs') = insertVar d (Value v) env stack rhs in Just (rhs', env', stack)
 unwind v env (PrimApply op vals [] : stack) =
     Just . (, env, stack) . Value $ applyPrimOp op (vals ++ [v])
 unwind v env (PrimApply op vals (t : ts) : stack) =

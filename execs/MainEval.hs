@@ -33,6 +33,7 @@ data REPLCmd
   = Step
   | Load String
   | Term String
+  | Repr
   deriving (Show, Read, Eq)
 
 runREPL :: Maybe State -> IO ()
@@ -42,43 +43,60 @@ runREPL initSt = do
     lastCmd      :: IORef (Maybe REPLCmd) <- newIORef Nothing
 
     let
+      showState :: Bool -> InputT IO ()
+      showState s = when s $ do
+        cs <- liftIO (readIORef currentState)
+        maybe (return ()) (outputStrLn . pprintState) cs
+
+      runCmd :: Maybe REPLCmd -> InputT IO Bool
       runCmd (Just Step) = do
         liftIO (readIORef currentState) >>= \case
           Nothing -> do
             outputStrLn "Can't evaluate, state is not set."
             outputStrLn "Try \"Load\" and \"Term\" commands."
+            return False
           Just st ->
             case evalStep st of
-              Nothing -> outputStrLn "Can't evaluate further."
+              Nothing -> outputStrLn "Can't evaluate further." >> return False
               Just st' -> liftIO $ do
                 writeIORef currentState (Just st')
                 modifyIORef stateHistory (st :)
+                return True
 
       runCmd (Just (Load path)) =
         liftIO (initState path) >>= \case
-          Left err -> outputStrLn $ "Can't parse file: " ++ err
-          Right st -> liftIO (writeIORef currentState (Just st))
+          Left err -> outputStrLn ("Can't parse file: " ++ err) >> return False
+          Right st -> liftIO (writeIORef currentState (Just st)) >> return True
 
       runCmd (Just (Term tm)) = do
         cur <- fromMaybe (undefined, M.empty, []) <$> liftIO (readIORef currentState)
         case setTerm tm cur of
-          Left err -> outputStrLn $ "Can't parse term: " ++ err
-          Right st -> liftIO (writeIORef currentState $ Just st)
+          Left err -> outputStrLn ("Can't parse term: " ++ err) >> return False
+          Right st -> liftIO (writeIORef currentState $ Just st) >> return True
 
-      runCmd Nothing = outputStrLn "Can't parse that."
+      runCmd (Just Repr) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> do
+            outputStrLn "State is not set."
+            outputStrLn "Try \"Load\" and \"Term\" commands."
+            return False
+          Just (term, _, _) -> do
+            outputStrLn $ show term
+            return False
+
+      runCmd Nothing = outputStrLn "Can't parse that." >> return False
 
     runInputT defaultSettings $ forever $ do
-      cs <- liftIO (readIORef currentState)
-      -- FIXME: We should print the whole state instead.
-      maybe (return ()) (outputStrLn . pprintState) cs
       getInputLine "> " >>= \case
         Just input
-          | null input -> liftIO (readIORef lastCmd) >>= runCmd
-          | otherwise   -> do
+          | null input ->
+              liftIO (readIORef lastCmd) >>= runCmd >>= showState
+          | otherwise  -> do
               let cmd = readMay input
               maybe (return ()) (liftIO . writeIORef lastCmd . Just) cmd
-              runCmd cmd
-        Nothing -> liftIO (readIORef lastCmd) >>= runCmd
+              runCmd cmd >>= showState
+        Nothing ->
+          liftIO (readIORef lastCmd) >>= runCmd >>= showState
 
 pprintTerm :: State -> String
 pprintTerm (term, _, _) = HSE.prettyPrint $ termToHSE term

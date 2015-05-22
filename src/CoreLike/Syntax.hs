@@ -50,7 +50,8 @@ fvsTerm (App tm v) = S.insert v $ fvsTerm tm
 fvsTerm (PrimOp _ ts) = S.unions $ map fvsTerm ts
 fvsTerm (Case tm cases) = S.unions $ fvsTerm tm : map fvsCase cases
 fvsTerm (LetRec bindings body) =
-    let (bound, free) = fvsBindings bindings in free `S.union` (fvsTerm body `S.difference` bound)
+    let (bound, free) = fvsBindings bindings
+     in free `S.union` (fvsTerm body `S.difference` bound)
 
 fvsVal :: Value -> S.Set Var
 fvsVal (Lambda arg body) = S.delete arg $ fvsTerm body
@@ -114,7 +115,7 @@ substCase v' t' alt@(d@(DataAlt con args), rhs)
         -- TODO: Test this code
         let t'fvs      = fvsTerm t'
             captured   = args `intersect` S.toList t'fvs
-            renamings  = zip captured (freshVarsFor $ S.toList $ altConVars d `S.union` vars rhs)
+            renamings  = zip captured (freshVarsFor $ altConVars d `S.union` vars rhs)
             renamings' = map (second Var) renamings
 
             renameBs :: [Var] -> [(Var, Var)] -> [Var]
@@ -177,19 +178,30 @@ vars' = S.unions . map vars
 
 -- | Come up with a var that's not used in given term.
 freshInTerm :: Term -> Var
-freshInTerm t = freshFor (S.toList $ vars t)
+freshInTerm t = freshFor (vars t)
 
 -- | Cope up with an infinite list of vars that are not used in given term.
 freshVarsInTerm :: Term -> [Var]
-freshVarsInTerm t = freshVarsFor (S.toList $ vars t)
+freshVarsInTerm t = freshVarsFor (vars t)
 
 -- | Come up with a var that's not in the given list of vars.
-freshFor :: [Var] -> Var
+freshFor :: S.Set Var -> Var
 freshFor vs = head $ freshVarsFor vs
 
--- | Come up with an infinite list of vars that are not in the given list of
+-- | Come up with an infinite list of vars that are not in the given set of
 -- vars.
-freshVarsFor :: [Var] -> [Var]
-freshVarsFor vs = supply \\ vs
+freshVarsFor :: S.Set Var -> [Var]
+freshVarsFor used =
+    filter (not . (`S.member` used)) supply
   where
     supply = map (('f' :) . show) [0..]
+
+-- | Similar with 'freshVarsFor', but returns names with given prefix.
+freshVarsForPfx :: String -> S.Set Var -> [Var]
+freshVarsForPfx s used =
+    filter (not . (`S.member` used)) supply
+  where
+    supply = map ((s ++) . show) [0..]
+
+freshForPfx :: String -> S.Set Var -> Var
+freshForPfx s used = (s ++) $ head $ freshVarsFor used

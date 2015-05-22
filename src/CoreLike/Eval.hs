@@ -1,13 +1,14 @@
-{-# LANGUAGE TupleSections, TupleSections #-}
+{-# LANGUAGE TupleSections #-}
 
 module CoreLike.Eval where
 
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 
+import CoreLike.Parser
 import CoreLike.Syntax
-import CoreLike.Parser -- testing
 
 type Env = M.Map Var Term
 
@@ -87,6 +88,8 @@ unwind val env (Update var : stack) =
     Just (Value val, M.insert var (Value val) env, stack)
 unwind (Lambda arg body) env (Apply v : stack) =
     let (env', body') = insertVar arg (Var v) env stack body in Just (body', env', stack)
+-- TODO: not sure about this case (same thing also exists in symbolic evaluator)
+unwind (Data con as) env (Apply v : stack) = Just (Value $ Data con (as ++ [v]), env, stack)
 unwind v@(Data con args) env (Scrutinise cases : stack) = findCase cases
   where
     findCase :: [(AltCon, Term)] -> Maybe State
@@ -133,6 +136,22 @@ applyPrimOp Mod [Literal (Int i1), Literal (Int i2)] =
 applyPrimOp Eq [Literal (Int i1), Literal (Int i2)] =
     Data (if i1 == i2 then "True" else "False") []
 applyPrimOp op lits = error $ "Unhandled PrimOp " ++ show op ++ " args: " ++ show lits
+
+-----------------------
+-- * Garbage collection
+
+gc :: Term -> Env -> Env
+gc root env = closure (M.fromList (mapMaybe lookupKV (S.toList (fvsTerm root))))
+  where
+    closure_iter e =
+      let vs = S.unions $ map (fvsTerm . snd) (M.toList e)
+       in e `M.union` M.fromList (mapMaybe lookupKV (S.toList vs))
+
+    closure e =
+      let c = closure_iter e
+       in if M.size e == M.size c then c else closure c
+
+    lookupKV k = (k,) <$> M.lookup k env
 
 ----------
 -- Testing

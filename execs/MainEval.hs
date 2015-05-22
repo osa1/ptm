@@ -34,6 +34,7 @@ data REPLCmd
   | Load String
   | Term String
   | Repr
+  | GC
   deriving (Show, Read, Eq)
 
 runREPL :: Maybe State -> IO ()
@@ -83,6 +84,13 @@ runREPL initSt = do
           Just (term, _, _) -> do
             outputStrLn $ show term
             return False
+
+      runCmd (Just GC) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> return False
+          Just (term, env, stack) -> do
+            liftIO $ writeIORef currentState $ Just (term, gc term env, stack)
+            return True
 
       runCmd Nothing = outputStrLn "Can't parse that." >> return False
 

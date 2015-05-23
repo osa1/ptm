@@ -164,6 +164,19 @@ gc root env stack =
 
     lookupKV k = (k,) <$> M.lookup k env
 
+-----------------------------
+-- * Residual code generation
+
+residualize :: State -> Term
+residualize (term, env, []) = LetRec (M.toList env) term
+residualize (term, env, Apply v : stack) = residualize (App term v, env, stack)
+residualize (term, env, Scrutinise cases : stack) =
+    residualize (Case term cases, env, stack)
+residualize (term, env, PrimApply op vs ts : stack) =
+    residualize (PrimOp op (map Value vs ++ term : ts), env, stack)
+residualize (term, env, Update v : stack) =
+    residualize (Var v, M.insert v term env, stack)
+
 ----------
 -- Testing
 

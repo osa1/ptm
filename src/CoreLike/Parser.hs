@@ -135,7 +135,7 @@ transformExp (HSE.Tuple _ args) = do
 transformExp e = throwError $ "Unsupported exp: " ++ show e
 
 mkTuple :: [Var] -> Value
-mkTuple vs = Data ('(' : replicate (length vs) ',' ++ ")") vs
+mkTuple vs = Data ('(' : replicate (length vs - 1) ',' ++ ")") vs
 
 -- | Introduce a let-binding for the term. Combines 'LetRec's returned by term
 -- builder.
@@ -174,7 +174,7 @@ transformPat (HSE.PList []) = return $ DataAlt "[]" []
 transformPat (HSE.PLit _sign lit) = transformLitPat lit
 transformPat HSE.PWildCard = DefaultAlt . Just <$> freshVar
 transformPat (HSE.PTuple _boxed pats) = do
-    let con = '(' : replicate (length pats) ',' ++ ")"
+    let con = '(' : replicate (length pats - 1) ',' ++ ")"
     args <- collectArgs pats
     return $ DataAlt con args
 transformPat p = throwError $ "transformPat: Unsupported pattern: " ++ show p

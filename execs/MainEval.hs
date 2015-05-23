@@ -34,6 +34,7 @@ data REPLCmd
   | Load String
   | Term String
   | Repr
+  | Residual
   | GC
   deriving (Show, Read, Eq)
 
@@ -91,6 +92,15 @@ runREPL initSt = do
           Just (term, env, stack) -> do
             liftIO $ writeIORef currentState $ Just (term, gc term env stack, stack)
             return True
+
+      runCmd (Just Residual) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> do
+            outputStrLn "Can't residualize: Context is not set."
+            return False
+          Just state -> do
+            outputStrLn (HSE.prettyPrint $ termToHSE $ residualize state)
+            return False
 
       runCmd Nothing = outputStrLn "Can't parse that." >> return False
 

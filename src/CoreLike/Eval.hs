@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE LambdaCase, TupleSections #-}
 
 module CoreLike.Eval where
 
@@ -140,9 +140,20 @@ applyPrimOp op lits = error $ "Unhandled PrimOp " ++ show op ++ " args: " ++ sho
 -----------------------
 -- * Garbage collection
 
-gc :: Term -> Env -> Env
-gc root env = closure (M.fromList (mapMaybe lookupKV (S.toList (fvsTerm root))))
+gc :: Term -> Env -> Stack -> Env
+gc root env stack =
+    closure (M.fromList (mapMaybe lookupKV $ S.toList used))
   where
+    used_stack = S.unions $ flip map stack $ \case
+      Apply v           -> S.singleton v
+      Scrutinise cases  -> S.unions $ map fvsCase cases
+      PrimApply _ vs ts -> S.unions $ map fvsVal vs ++ map fvsTerm ts
+      Update v          -> S.singleton v
+
+    used_term = fvsTerm root
+
+    used = S.union used_term used_stack
+
     closure_iter e =
       let vs = S.unions $ map (fvsTerm . snd) (M.toList e)
        in e `M.union` M.fromList (mapMaybe lookupKV (S.toList vs))

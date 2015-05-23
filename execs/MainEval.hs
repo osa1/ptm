@@ -89,7 +89,7 @@ runREPL initSt = do
         liftIO (readIORef currentState) >>= \case
           Nothing -> return False
           Just (term, env, stack) -> do
-            liftIO $ writeIORef currentState $ Just (term, gc term env, stack)
+            liftIO $ writeIORef currentState $ Just (term, gc term env stack, stack)
             return True
 
       runCmd Nothing = outputStrLn "Can't parse that." >> return False

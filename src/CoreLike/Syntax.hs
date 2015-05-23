@@ -124,7 +124,8 @@ substCase v' t' alt@(d@(DataAlt con args), rhs)
          in
            if null captured
               then (DataAlt con args, substTerm v' t' rhs)
-              else substCase v' t' (DataAlt con (renameBs args renamings), substTerms renamings' rhs)
+              else substCase v' t' (DataAlt con (renameBs args renamings),
+                                    substTerms renamings' rhs)
 
 substCase v' t' (l@LiteralAlt{}, rhs) = (l, substTerm v' t' rhs)
 substCase v' t' (DefaultAlt Nothing, rhs) = (DefaultAlt Nothing, substTerm v' t' rhs)
@@ -180,7 +181,7 @@ vars' = S.unions . map vars
 freshInTerm :: Term -> Var
 freshInTerm t = freshFor (vars t)
 
--- | Cope up with an infinite list of vars that are not used in given term.
+-- | Come up with an infinite list of vars that are not used in given term.
 freshVarsInTerm :: Term -> [Var]
 freshVarsInTerm t = freshVarsFor (vars t)
 

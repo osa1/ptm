@@ -1,27 +1,31 @@
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+
 module CoreLike.Syntax where
 
 import Control.Arrow (second)
-import Data.List (delete, foldl', intersect, (\\))
+import Data.Binary (Binary)
+import Data.List (delete, foldl', intersect)
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
+import GHC.Generics (Generic)
 
 type Var = String
 
 type DataCon = String
 
 data PrimOp = Add | Sub | Mul | Div | Mod | Eq | LT | LTE
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, Binary)
 
 data AltCon
   = DataAlt DataCon [Var]
   | LiteralAlt Literal
   | DefaultAlt (Maybe Var)
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, Binary)
 
 data Literal
   = Int Integer
   | Char Char
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, Binary)
 
 data Term
   = Var Var
@@ -30,7 +34,7 @@ data Term
   | PrimOp PrimOp [Term] -- TODO: Why isn't this in ANF?
   | Case Term [(AltCon, Term)]
   | LetRec [(Var, Term)] Term
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, Binary)
 
 data Value
   = Lambda Var Term
@@ -38,7 +42,7 @@ data Value
   | Literal Literal
   -- This is needed for call-by-need evaluation
   -- | Indirect Var
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, Binary)
 
 ------------------------------
 -- * Collecting free variables

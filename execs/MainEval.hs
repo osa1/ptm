@@ -13,6 +13,7 @@ import System.Console.Haskeline
 import System.Directory (doesFileExist)
 import qualified Text.PrettyPrint.Leijen as PP
 
+import CoreLike.Debug (loadState, saveState)
 import CoreLike.Eval
 import CoreLike.ToHSE
 
@@ -36,6 +37,8 @@ data REPLCmd
   | Repr
   | Residual
   | GC
+  | SaveFile FilePath
+  | LoadFile FilePath
   deriving (Show, Read, Eq)
 
 runREPL :: Maybe State -> IO ()
@@ -101,6 +104,16 @@ runREPL initSt = do
           Just state -> do
             outputStrLn (HSE.prettyPrint $ termToHSE $ residualize state)
             return False
+
+      runCmd (Just (LoadFile f)) =
+        liftIO (loadState f) >>= \case
+          Left err -> outputStrLn ("Can't load from file: " ++ f) >> return False
+          Right s  -> liftIO (writeIORef currentState $ Just s) >> return True
+
+      runCmd (Just (SaveFile f)) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> outputStrLn "Can't save to file: Context is not set." >> return False
+          Just s  -> liftIO (saveState f s) >> outputStrLn "Done." >> return False
 
       runCmd Nothing = outputStrLn "Can't parse that." >> return False
 

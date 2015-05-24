@@ -1,11 +1,13 @@
-{-# LANGUAGE LambdaCase, TupleSections #-}
+{-# LANGUAGE DeriveAnyClass, DeriveGeneric, LambdaCase, TupleSections #-}
 
 module CoreLike.Eval where
 
+import Data.Binary (Binary)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
+import GHC.Generics (Generic)
 
 import CoreLike.Parser
 import CoreLike.Syntax
@@ -17,7 +19,7 @@ data StackFrame
   | Scrutinise [(AltCon, Term)]
   | PrimApply PrimOp [Value] [Term]
   | Update Var
-  deriving (Show)
+  deriving (Show, Generic, Binary)
 
 type Stack = [StackFrame]
 

@@ -50,6 +50,9 @@ envVars = M.keysSet
 updateVars :: Stack -> S.Set Var
 updateVars s = S.fromList [ v | Update v <- s ]
 
+envVals :: Env -> [Var] -> [(Var, Term)]
+envVals e vs = mapMaybe (\v -> (v,) <$> M.lookup v e) vs
+
 -- NOTE: This updates RHSs of let bindings.
 mapVars :: [(Var, Term)] -> Env -> Stack -> Term -> (Env, Term)
 mapVars binds env stack body = (env', body')
@@ -137,6 +140,31 @@ applyPrimOp Eq [Literal (Int i1), Literal (Int i2)] =
     Data (if i1 == i2 then "True" else "False") []
 applyPrimOp op lits = error $ "Unhandled PrimOp " ++ show op ++ " args: " ++ show lits
 
+-- | A "big-step" evaluator that takes steps until it's stuck. Returns new state
+-- and a list of heap bindings that are updated during the evaluation.
+--
+-- Returns `Nothing` if it can't take any steps. (to save a `==` call)
+--
+-- NOTE: Doesn't effect the correctness because we use a set, but each variable
+-- is added to the set multiple times. Example:
+--
+--   let x = ... in x
+--
+-- We see `Update x` frame first time when it's pushed to the stack and `x` is
+-- replaced with RHS. We see it second time when RHS is evaluated to a value.
+--
+-- If it gets stuck on the way, then we see `Update x` once.
+--
+eval :: State -> Maybe (State, S.Set Var)
+eval s@(_, _, Update v : _) =
+    case evalStep s of
+      Nothing -> Nothing
+      Just s' ->
+        case eval s' of
+          Nothing        -> Just (s', S.singleton v)
+          Just (s'', vs) -> Just (s'', S.insert v vs)
+eval s = evalStep s >>= eval
+
 -----------------------
 -- * Garbage collection
 
@@ -176,6 +204,61 @@ residualize (term, env, PrimApply op vs ts : stack) =
     residualize (PrimOp op (map Value vs ++ term : ts), env, stack)
 residualize (term, env, Update v : stack) =
     residualize (Var v, M.insert v term env, stack)
+
+-----------------------------------------------
+-- * Splitting the state for evaluating further
+
+-- | Splitting is only possible when evaluation is stuck or completed(WHNF).
+-- In other cases or if splitting is not possible for some reason, it returns
+-- `Nothing`.
+split :: State -> Maybe ([State], [(State, S.Set Var)] -> State)
+
+-- Cases for completed evaluation:
+
+split (v@(Value (Data _ args)), heap, stack) =
+    let states =
+          flip map args $ \arg -> (Var arg, M.delete arg heap, [])
+        combine ss = (v, , stack) $
+          -- We need to combine all these states into single state that'll
+          -- represent progressed version of our initial state.
+          --
+          -- New states have to be in one of these conditions:
+          -- 1. Stuck with an unbound name in focus
+          -- 2. Stuck with empty continuation stack.
+          --    (which means evaluation succeeded)
+          -- 3. Non-exhaustive pattern matching.
+          --    (TODO: To keep things simple maybe we should ignore this case and
+          --     fail with `error` instead)
+          --
+          -- Because the evaluator gets stuck only when one of these happen.
+          foldl' (\h (updatedVar, s) ->
+                   case s of
+                     -- Case (1). TODO: What to do with the stack here?
+                     ((t@Var{}, h', stack'), updates) ->
+                        M.insert updatedVar t $
+                          M.union (M.fromList (envVals h' $ S.toList updates)) h
+
+                     -- Case (2), we can just update the heap binding with this
+                     -- new term.
+                     ((t, h', []), updates) ->
+                       M.insert updatedVar t $
+                         M.union (M.fromList (envVals h' $ S.toList updates)) h
+
+                     -- Case (3) is not handled.
+                     _ -> error $ "Unhandled case in state combiner: " ++ show s)
+                 heap (zip args ss)
+    in Just (states, combine)
+
+-- TODO: Complete this (function bodies etc.)
+split (Value{}, _, _) = Nothing
+
+-- Cases for getting stuck:
+
+split (Var{}, _, _) = Nothing -- TODO: Can we make any progress here?
+
+
+-- Other cases: (TODO: maybe report a bug here?)
+split _ = Nothing
 
 ----------
 -- Testing

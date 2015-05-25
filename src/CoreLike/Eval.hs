@@ -5,7 +5,7 @@ module CoreLike.Eval where
 import Data.Binary (Binary)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
 import GHC.Generics (Generic)
 
@@ -162,10 +162,12 @@ eval s@(_, _, Update v : _) =
     case evalStep s of
       Nothing -> Nothing
       Just s' ->
-        case eval s' of
-          Nothing        -> Just (s', S.singleton v)
-          Just (s'', vs) -> Just (s'', S.insert v vs)
-eval s = evalStep s >>= eval
+        Just $ case eval s' of
+                 Nothing        -> (s', S.singleton v)
+                 Just (s'', vs) -> (s'', S.insert v vs)
+eval s = do
+    s' <- evalStep s
+    return $ fromMaybe (s', S.empty) $ eval s'
 
 -----------------------
 -- * Garbage collection

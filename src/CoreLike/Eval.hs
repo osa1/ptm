@@ -202,6 +202,34 @@ gc root env stack =
 
     lookupKV k = (k,) <$> M.lookup k env
 
+-- | Remove indirections from the heap.
+--
+-- E.g. if we have
+--
+--   l_1 = l_2
+--   l_2 = l_3
+--
+-- It changes l_1 to l_1 = l_3
+--
+-- NOTE: May lead to unused bindings, so it may be a good idea to call `gc`
+-- after this.
+--
+-- TODO: We can probably do some transformations like unboxing, by inlining
+-- literals.
+simplHeap :: Env -> Env
+simplHeap env = M.map removeLinks env
+  where
+    removeLinks :: Term -> Term
+    removeLinks (Var v) = Var $ removeLinks' v
+    removeLinks (App f v) = App (removeLinks f) (removeLinks' v)
+    removeLinks t = t -- FIXME: We can improve this a lot
+
+    removeLinks' :: Var -> Var
+    removeLinks' v =
+      case M.lookup v env of
+        Just (Var v') -> removeLinks' v'
+        _             -> v
+
 -----------------------------
 -- * Residual code generation
 

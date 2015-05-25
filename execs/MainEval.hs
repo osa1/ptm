@@ -38,6 +38,7 @@ data REPLCmd
   | Repr
   | Residual
   | GC
+  | Simpl
   | SaveFile FilePath
   | LoadFile FilePath
   deriving (Show, Read, Eq)
@@ -110,6 +111,13 @@ runREPL initSt = do
           Nothing -> return False
           Just (term, env, stack) -> do
             liftIO $ writeIORef currentState $ Just (term, gc term env stack, stack)
+            return True
+
+      runCmd (Just Simpl) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> return False
+          Just (term, env, stack) -> do
+            liftIO $ writeIORef currentState $ Just (term, simplHeap env, stack)
             return True
 
       runCmd (Just Residual) =

@@ -68,8 +68,7 @@ executable ptm-eval
     mtl,
     ptm,
     safe,
-    transformers,
-    wl-pprint >= 1.2 && < 1.3
+    transformers
 
   hs-source-dirs:      execs
   default-language:    Haskell2010

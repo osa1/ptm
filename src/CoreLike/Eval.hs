@@ -2,15 +2,21 @@
 
 module CoreLike.Eval where
 
+import Control.Arrow (second)
 import Data.Binary (Binary)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
 import GHC.Generics (Generic)
+import qualified Language.Haskell.Exts as HSE
+import qualified Text.PrettyPrint.Leijen as PP
 
 import CoreLike.Parser
 import CoreLike.Syntax
+import CoreLike.ToHSE
+
+import Debug.Trace
 
 type Env = M.Map Var Term
 
@@ -212,6 +218,11 @@ residualize (term, env, Update v : stack) =
 -----------------------------------------------
 -- * Splitting the state for evaluating further
 
+zipErr :: [a] -> [b] -> [(a, b)]
+zipErr (a : as) (b : bs) = (a, b) : zipErr as bs
+zipErr []       []       = []
+zipErr _        _        = error "zipErr: lengths are not equal"
+
 -- | Splitting is only possible when evaluation is stuck or completed(WHNF).
 -- In other cases or if splitting is not possible for some reason, it returns
 -- `Nothing`.
@@ -221,8 +232,9 @@ split :: State -> Maybe ([State], [(State, S.Set Var)] -> State)
 
 split (v@(Value (Data _ args)), heap, stack) =
     let states =
-          flip map args $ \arg -> (Var arg, M.delete arg heap, [])
+          flip map args $ \arg -> (Var arg, heap, [])
         combine ss = (v, , stack) $
+          -- trace ("combining states: " ++ showStates (map fst ss)) $
           -- We need to combine all these states into single state that'll
           -- represent progressed version of our initial state.
           --
@@ -239,18 +251,21 @@ split (v@(Value (Data _ args)), heap, stack) =
                    case s of
                      -- Case (1). TODO: What to do with the stack here?
                      ((t@Var{}, h', stack'), updates) ->
+                        -- trace ("M.insert (1) " ++ updatedVar ++ " " ++ show t) $
+                        -- trace ("Updates: " ++ show updates) $
                         M.insert updatedVar t $
                           M.union (M.fromList (envVals h' $ S.toList updates)) h
 
                      -- Case (2), we can just update the heap binding with this
                      -- new term.
                      ((t, h', []), updates) ->
+                       -- trace ("M.insert (2) " ++ updatedVar ++ " " ++ show t) $
                        M.insert updatedVar t $
                          M.union (M.fromList (envVals h' $ S.toList updates)) h
 
                      -- Case (3) is not handled.
                      _ -> error $ "Unhandled case in state combiner: " ++ show s)
-                 heap (zip args ss)
+                 heap (zipErr args ss)
     in Just (states, combine)
 
 -- TODO: Complete this (function bodies etc.)
@@ -264,8 +279,26 @@ split (Var{}, _, _) = Nothing -- TODO: Can we make any progress here?
 -- Other cases: (TODO: maybe report a bug here?)
 split _ = Nothing
 
-----------
--- Testing
+
+--------------------------------------
+-- | Main routine for supercompilation
+
+drive :: State -> State
+drive s = fst $ iter s
+  where
+    iter s =
+      case eval s of
+        Nothing -> (s, S.empty)
+        Just (s', updates) ->
+          case split s' of
+            Nothing -> (s', updates)
+            Just (ss, combine) ->
+              let splits = map iter ss
+               in (combine (map (second $ S.union updates) splits),
+                   S.unions (updates : map snd splits))
+
+-----------------------------------
+-- * Testing and utilities for REPL
 
 initState :: FilePath -> IO (Either String State)
 initState path =
@@ -273,3 +306,34 @@ initState path =
 
 setTerm :: String -> State -> (Either String State)
 setTerm termStr (_, env, stack) = (, env, stack) <$> parseTerm termStr
+
+---------------------------
+-- * Pretty-printing states
+
+ppTerm :: Term -> PP.Doc
+ppTerm = PP.string . HSE.prettyPrint . termToHSE
+
+ppEnv :: Env -> PP.Doc
+ppEnv =
+    PP.list
+    . map (\(k, v) -> PP.nest 4 (PP.text k PP.<+> PP.text "=" PP.</>
+                                   PP.string (HSE.prettyPrint (termToHSE v))))
+    . M.toList
+
+ppStack :: Stack -> PP.Doc
+ppStack = PP.list . map (PP.text . show)
+
+ppState :: State -> PP.Doc
+ppState (t, e, s) = PP.tupled [ ppEnv e, ppStack s, ppTerm t ]
+
+ppStates :: [State] -> PP.Doc
+ppStates = PP.list . map ppState
+
+showDoc :: PP.Doc -> String
+showDoc = flip PP.displayS "" . PP.renderPretty 0.8 100
+
+showState :: State -> String
+showState = showDoc . ppState
+
+showStates :: [State] -> String
+showStates = showDoc . ppStates

@@ -11,7 +11,6 @@ import qualified Language.Haskell.Exts as HSE
 import Safe (readMay)
 import System.Console.Haskeline
 import System.Directory (doesFileExist)
-import qualified Text.PrettyPrint.Leijen as PP
 
 import CoreLike.Debug (loadState, saveState)
 import CoreLike.Eval
@@ -32,6 +31,8 @@ main = do
 
 data REPLCmd
   = Step
+  | Drive
+  | Eval
   | Load String
   | Term String
   | Repr
@@ -44,17 +45,16 @@ data REPLCmd
 runREPL :: Maybe State -> IO ()
 runREPL initSt = do
     currentState :: IORef (Maybe State)   <- newIORef initSt
-    stateHistory :: IORef [State]         <- newIORef []
     lastCmd      :: IORef (Maybe REPLCmd) <- newIORef Nothing
 
     let
-      showState :: Bool -> InputT IO ()
-      showState s = when s $ do
+      printState :: Bool -> InputT IO ()
+      printState s = when s $ do
         cs <- liftIO (readIORef currentState)
-        maybe (return ()) (outputStrLn . pprintState) cs
+        maybe (return ()) (outputStrLn . showState) cs
 
       runCmd :: Maybe REPLCmd -> InputT IO Bool
-      runCmd (Just Step) = do
+      runCmd (Just Step) =
         liftIO (readIORef currentState) >>= \case
           Nothing -> do
             outputStrLn "Can't evaluate, state is not set."
@@ -63,10 +63,26 @@ runREPL initSt = do
           Just st ->
             case evalStep st of
               Nothing -> outputStrLn "Can't evaluate further." >> return False
-              Just st' -> liftIO $ do
-                writeIORef currentState (Just st')
-                modifyIORef stateHistory (st :)
-                return True
+              Just st' -> liftIO (writeIORef currentState (Just st')) >> return True
+
+      runCmd (Just Drive) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> do
+            outputStrLn "Can't drive, state is not set."
+            outputStrLn "Try \"Load\" and \"Term\" commands."
+            return False
+          Just st -> liftIO (writeIORef currentState $ Just $ drive st) >> return True
+
+      runCmd (Just Eval) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> do
+            outputStrLn "Can't evaluate, state is not set."
+            outputStrLn "Try \"Load\" and \"Term\" commands."
+            return False
+          Just st ->
+            case eval st of
+              Nothing -> outputStrLn "Can't evaluate further." >> return False
+              Just (st', _) -> liftIO (writeIORef currentState $ Just st') >> return True
 
       runCmd (Just (Load path)) =
         liftIO (initState path) >>= \case
@@ -107,7 +123,9 @@ runREPL initSt = do
 
       runCmd (Just (LoadFile f)) =
         liftIO (loadState f) >>= \case
-          Left err -> outputStrLn ("Can't load from file: " ++ f) >> return False
+          Left err -> do
+            outputStrLn ("Can't load from file " ++ f ++ ": " ++ err)
+            return False
           Right s  -> liftIO (writeIORef currentState $ Just s) >> return True
 
       runCmd (Just (SaveFile f)) =
@@ -121,26 +139,10 @@ runREPL initSt = do
       getInputLine "> " >>= \case
         Just input
           | null input ->
-              liftIO (readIORef lastCmd) >>= runCmd >>= showState
+              liftIO (readIORef lastCmd) >>= runCmd >>= printState
           | otherwise  -> do
               let cmd = readMay input
               maybe (return ()) (liftIO . writeIORef lastCmd . Just) cmd
-              runCmd cmd >>= showState
+              runCmd cmd >>= printState
         Nothing ->
-          liftIO (readIORef lastCmd) >>= runCmd >>= showState
-
-pprintTerm :: State -> String
-pprintTerm (term, _, _) = HSE.prettyPrint $ termToHSE term
-
-pprintStack :: State -> String
-pprintStack (_, _, stack) =
-    PP.displayS (PP.renderPretty 0.8 100 $ PP.list (map (PP.text . show) stack)) ""
-
-pprintState :: State -> String
-pprintState (term, env, stack) = flip PP.displayS "" . PP.renderPretty 0.8 100 . PP.tupled $
-    [ PP.list $ map (\(k, v) -> PP.nest 4 (PP.text k PP.<+> PP.text "=" PP.</>
-                                             PP.string (HSE.prettyPrint (termToHSE v))))
-                    (M.toList env)
-    , PP.list $ map (PP.text . show) stack
-    , PP.string (HSE.prettyPrint $ termToHSE term)
-    ]
+          liftIO (readIORef lastCmd) >>= runCmd >>= printState

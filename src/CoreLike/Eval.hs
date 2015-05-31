@@ -133,6 +133,27 @@ unwind v _ s =
     error $ "unwind: Found ill-typed term, is this a bug?\n"
             ++ "value: " ++ show v ++ "stack: " ++ show s
 
+-- | Unwind the whole stack. Focus may not be a value.
+unwindAll :: Term -> Env -> Stack -> (Term, Env)
+unwindAll t e [] = (t, e)
+unwindAll (Value v) e s@(f : fs) =
+    case unwind v e s of
+      Just (t, e', s') -> unwindAll t e' s'
+      Nothing ->
+        case f of
+          Apply arg -> unwindAll (App (Value v) arg) e fs
+          Scrutinise cases -> unwindAll (Case (Value v) cases) e fs
+          PrimApply op vs ts ->
+            unwindAll (PrimOp op $ (map Value $ vs ++ [v]) ++ ts) e fs
+          Update var -> unwindAll (Value v) (M.insert var (Value v) e) fs
+unwindAll t e (Apply v : fs) = unwindAll (App t v) e fs
+unwindAll t e (Scrutinise cases : fs) = unwindAll (Case t cases) e fs
+unwindAll t e (PrimApply op vs ts : fs) =
+    unwindAll (PrimOp op $ map Value vs ++ ts ++ [t]) e fs
+unwindAll t e (Update v : fs) =
+    -- TODO: This looks dangerous -- may duplicate lots of work.
+    unwindAll t (M.insert v t e) fs
+
 applyPrimOp :: PrimOp -> [Value] -> Value
 applyPrimOp Add [Literal (Int i1), Literal (Int i2)] =
     Literal $ Int $ i1 + i2
@@ -251,6 +272,20 @@ zipErr (a : as) (b : bs) = (a, b) : zipErr as bs
 zipErr []       []       = []
 zipErr _        _        = error "zipErr: lengths are not equal"
 
+-- | evaluate -> split -> recurse
+evalSplit :: State -> State
+evalSplit s = splitEval $ maybe s fst $ eval s
+
+-- | split -> evaluate -> recurse
+splitEval :: State -> State
+splitEval (v@(Value (Data _ args)), env, stack) =
+  let states = flip map args $ \arg -> (arg, (Var arg, , []))
+  in (v, , stack) $ foldl' (\e (a, s) ->
+        let (t, e', s') = evalSplit (s e)
+            (t', e'')   = unwindAll t e' s'
+         in M.insert a t' e'') env states
+splitEval s = s -- TODO: Implement this
+
 -- | Splitting is only possible when evaluation is stuck or completed(WHNF).
 -- In other cases or if splitting is not possible for some reason, it returns
 -- `Nothing`.
@@ -258,42 +293,12 @@ split :: State -> Maybe ([State], [(State, S.Set Var)] -> State)
 
 -- Cases for completed evaluation:
 
-split (v@(Value (Data _ args)), heap, stack) =
+split (v@(Value (Data _ args)), env, stack) =
     let states =
-          flip map args $ \arg -> (Var arg, heap, [])
+          flip map args $ \arg -> (Var arg, env, [])
         combine ss = (v, , stack) $
-          -- trace ("combining states: " ++ showStates (map fst ss)) $
-          -- We need to combine all these states into single state that'll
-          -- represent progressed version of our initial state.
-          --
-          -- New states have to be in one of these conditions:
-          -- 1. Stuck with an unbound name in focus
-          -- 2. Stuck with empty continuation stack.
-          --    (which means evaluation succeeded)
-          -- 3. Non-exhaustive pattern matching.
-          --    (TODO: To keep things simple maybe we should ignore this case and
-          --     fail with `error` instead)
-          --
-          -- Because the evaluator gets stuck only when one of these happen.
-          foldl' (\h (updatedVar, s) ->
-                   case s of
-                     -- Case (1). TODO: What to do with the stack here?
-                     ((t@Var{}, h', stack'), updates) ->
-                        -- trace ("M.insert (1) " ++ updatedVar ++ " " ++ show t) $
-                        -- trace ("Updates: " ++ show updates) $
-                        M.insert updatedVar t $
-                          M.union (M.fromList (envVals h' $ S.toList updates)) h
-
-                     -- Case (2), we can just update the heap binding with this
-                     -- new term.
-                     ((t, h', []), updates) ->
-                       -- trace ("M.insert (2) " ++ updatedVar ++ " " ++ show t) $
-                       M.insert updatedVar t $
-                         M.union (M.fromList (envVals h' $ S.toList updates)) h
-
-                     -- Case (3) is not handled.
-                     _ -> error $ "Unhandled case in state combiner: " ++ show s)
-                 heap (zipErr args ss)
+          trace ("combining states: " ++ showStates (map fst ss)) $
+          foldl' combineFold env (zipErr args ss)
     in Just (states, combine)
 
 -- TODO: Complete this (function bodies etc.)
@@ -301,29 +306,63 @@ split (Value{}, _, _) = Nothing
 
 -- Cases for getting stuck:
 
-split (Var{}, _, _) = Nothing -- TODO: Can we make any progress here?
+split (v@Var{}, env, (Apply arg : stack)) =
+    let states = [ (Var arg, env, []) ]
+        combine ss = (v, , stack) $
+          trace ("combining states: " ++ showStates (map fst ss)) $
+          foldl' combineFold env (zipErr [arg] ss)
+    in Just (states, combine)
 
+split (Var{}, _, _) = Nothing -- TODO: add other cases here
 
 -- Other cases: (TODO: maybe report a bug here?)
 split _ = Nothing
 
+-- We need to combine all these states into single state that'll represent
+-- progressed version of our initial state.
+--
+-- New states have to be in one of these conditions:
+-- 1. Stuck with an unbound name in focus
+-- 2. Stuck with empty continuation stack.
+--    (which means evaluation succeeded)
+-- 3. Non-exhaustive pattern matching.
+--    (TODO: To keep things simple maybe we should ignore this case and fail
+--     with `error` instead)
+--
+-- Because the evaluator gets stuck only when one of these happen.
+combineFold
+  :: Env
+     -- ^ partially updated environment
+  -> (Var, (State, S.Set Var))
+     -- ^ (the variable we're updating,
+     --    (state after the update,
+     --     other variables that are updated while
+     --     evaluating the first element of tuple))
+  -> Env
+     -- ^ environment after updating old environment for the evaluated bindings
+
+-- Case (1). TODO: What to do with the stack here?
+combineFold h (updatedVar, ((t@Var{}, h', stack'), updates)) =
+  trace ("M.insert (1) " ++ updatedVar ++ " " ++ show t) $
+  trace ("Updates: " ++ show updates) $
+  M.insert updatedVar (residualize (t, M.empty, stack')) $
+    M.union (M.fromList (envVals h' $ S.toList updates)) h
+
+-- Case (2), we can just update the heap binding with this new term.
+combineFold h (updatedVar, ((t, h', []), updates)) =
+  trace ("M.insert (2) " ++ updatedVar ++ " " ++ show t) $
+  M.insert updatedVar t $
+    M.union (M.fromList (envVals h' $ S.toList updates)) h
+
+-- Case (3) is not handled.
+combineFold _ (_, (s, _)) =
+  error $ "Unhandled case in state combiner: " ++ show s
 
 --------------------------------------
 -- | Main routine for supercompilation
 
 drive :: State -> State
-drive s = fst $ iter s
-  where
-    iter s =
-      case eval s of
-        Nothing -> (s, S.empty)
-        Just (s', updates) ->
-          case split s' of
-            Nothing -> (s', updates)
-            Just (ss, combine) ->
-              let splits = map iter ss
-               in (combine (map (second $ S.union updates) splits),
-                   S.unions (updates : map snd splits))
+drive = evalSplit
 
 -----------------------------------
 -- * Testing and utilities for REPL

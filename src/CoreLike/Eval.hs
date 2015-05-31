@@ -25,7 +25,7 @@ data StackFrame
   | Scrutinise [(AltCon, Term)]
   | PrimApply PrimOp [Value] [Term]
   | Update Var
-  deriving (Show, Generic, Binary)
+  deriving (Show, Eq, Generic, Binary)
 
 type Stack = [StackFrame]
 

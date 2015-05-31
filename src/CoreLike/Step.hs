@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveFunctor, QuasiQuotes #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module CoreLike.Step where
 

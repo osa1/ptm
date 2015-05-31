@@ -14,3 +14,6 @@ loadState f = do
     return $ case ret of
                Left (_, err) -> Left err
                Right s -> Right s
+
+loadState' :: FilePath -> IO State
+loadState' = fmap (\(Right r) -> r) . loadState

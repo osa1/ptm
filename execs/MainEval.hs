@@ -41,18 +41,25 @@ data REPLCmd
   | Simpl
   | SaveFile FilePath
   | LoadFile FilePath
+  | Tee FilePath REPLCmd
   deriving (Show, Read, Eq)
 
 runREPL :: Maybe State -> IO ()
 runREPL initSt = do
-    currentState :: IORef (Maybe State)   <- newIORef initSt
-    lastCmd      :: IORef (Maybe REPLCmd) <- newIORef Nothing
+    currentState :: IORef (Maybe State)    <- newIORef initSt
+    lastCmd      :: IORef (Maybe REPLCmd)  <- newIORef Nothing
+    tee          :: IORef (Maybe FilePath) <- newIORef Nothing
 
     let
       printState :: Bool -> InputT IO ()
-      printState s = when s $ do
-        cs <- liftIO (readIORef currentState)
-        maybe (return ()) (outputStrLn . showState) cs
+      printState s = when s $
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> return ()
+          Just st -> do
+            let sts = showState st
+            maybe (return ()) (\f -> liftIO $ writeFile f sts >> writeIORef tee Nothing)
+              =<< liftIO (readIORef tee)
+            outputStrLn sts
 
       runCmd :: Maybe REPLCmd -> InputT IO Bool
       runCmd (Just Step) =
@@ -120,14 +127,16 @@ runREPL initSt = do
             liftIO $ writeIORef currentState $ Just (term, simplHeap env, stack)
             return True
 
-      runCmd (Just Residual) =
+      runCmd (Just Residual) = do
         liftIO (readIORef currentState) >>= \case
           Nothing -> do
             outputStrLn "Can't residualize: Context is not set."
-            return False
           Just state -> do
-            outputStrLn (HSE.prettyPrint $ termToHSE $ residualize state)
-            return False
+            let str = HSE.prettyPrint $ termToHSE $ residualize state
+            maybe (return ()) (\f -> liftIO $ writeFile f str >> writeIORef tee Nothing)
+              =<< liftIO (readIORef tee)
+            outputStrLn str
+        return False
 
       runCmd (Just (LoadFile f)) =
         liftIO (loadState f) >>= \case
@@ -140,6 +149,9 @@ runREPL initSt = do
         liftIO (readIORef currentState) >>= \case
           Nothing -> outputStrLn "Can't save to file: Context is not set." >> return False
           Just s  -> liftIO (saveState f s) >> outputStrLn "Done." >> return False
+
+      runCmd (Just (Tee file cmd)) =
+        liftIO (writeIORef tee $ Just file) >> runCmd (Just cmd)
 
       runCmd Nothing = outputStrLn "Can't parse that." >> return False
 

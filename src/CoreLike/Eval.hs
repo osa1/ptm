@@ -388,7 +388,19 @@ ppEnv =
     . M.toList
 
 ppStack :: Stack -> PP.Doc
-ppStack = PP.list . map (PP.text . show)
+ppStack = PP.list . map ppStackFrame . reverse
+
+-- haskell-src-exts doesn't export methods for generating `Doc`, and even if it
+-- did we couldn't incorporate it easily since it's using `pretty`. So we just
+-- pretty-print terms, wrap them with `PP.string` and hope that `wl-pprint`
+-- won't remove newlines.
+ppStackFrame :: StackFrame -> PP.Doc
+ppStackFrame = PP.string . HSE.prettyPrint . termToHSE . ppF
+  where
+    ppF (Apply v) = App (Var "●") v
+    ppF (Scrutinise cases) = Case (Var "●") cases
+    ppF (PrimApply op vs ts) = PrimOp op (map Value vs ++ ts)
+    ppF (Update v) = Value $ Data "Update" [v]
 
 ppState :: State -> PP.Doc
 ppState (t, e, s) = PP.tupled [ ppEnv e, ppStack s, ppTerm t ]

@@ -2,9 +2,9 @@
 
 module CoreLike.Parser where
 
-import Control.Arrow (first)
 import Control.Monad.Except
 import Control.Monad.State.Strict
+import Data.Bifunctor (first)
 import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 import Prelude hiding (LT)

@@ -2,7 +2,7 @@
 
 module CoreLike.Eval where
 
-import Control.Arrow (second)
+import Data.Bifunctor (second)
 import Data.Binary (Binary)
 import Data.List (foldl')
 import Data.List ((\\))

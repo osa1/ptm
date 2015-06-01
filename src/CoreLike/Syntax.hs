@@ -2,7 +2,7 @@
 
 module CoreLike.Syntax where
 
-import Control.Arrow (second)
+import Data.Bifunctor (second)
 import Data.Binary (Binary)
 import Data.List (delete, foldl', intersect)
 import qualified Data.Map as M

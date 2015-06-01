@@ -1,6 +1,6 @@
 module CoreLike.Simplify (simpl) where
 
-import Control.Arrow (second)
+import Data.Bifunctor (second)
 import Data.List (intersect)
 import qualified Data.Set as S
 

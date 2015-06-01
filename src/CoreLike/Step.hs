@@ -15,8 +15,6 @@ import CoreLike.Simplify
 import CoreLike.Syntax
 import CoreLike.ToHSE
 
-type Env = M.Map Var Term
-
 data Restriction
   = NEq Var (Either DataCon Literal) -- TODO: Use this in default branches.
   deriving (Show, Eq)

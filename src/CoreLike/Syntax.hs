@@ -1,10 +1,11 @@
-{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass, DeriveGeneric #-}
 
 module CoreLike.Syntax where
 
 import Control.Arrow (second)
 import Data.Binary (Binary)
 import Data.List (delete, foldl', intersect)
+import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import GHC.Generics (Generic)
@@ -43,6 +44,8 @@ data Value
   -- This is needed for call-by-need evaluation
   -- | Indirect Var
   deriving (Show, Eq, Ord, Generic, Binary)
+
+type Env = M.Map Var Term
 
 ------------------------------
 -- * Collecting free variables

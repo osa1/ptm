@@ -87,4 +87,14 @@ reverse l =
     [] -> []
     x : xs -> append (reverse xs) [x]
 
+zip xs ys =
+  case xs of
+    x : xs' ->
+      case ys of
+        y : ys' -> (x, y) : zip xs' ys'
+        [] -> []
+    [] -> []
+
 example = span odd [1,2,3]
+
+example2 = zip (map f xs) (map g ys)

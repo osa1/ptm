@@ -237,7 +237,7 @@ stepPrimOp _ _ = Stuck
 ------------
 -- * Testing
 
--- Use haskell-src-exts quoter(haskell-src-exts-qq) once #10279 is fixed.
+-- TODO: use haskell-src-exts quoter(haskell-src-exts-qq) once #10279 is fixed.
 
 parseEnv :: [(String, String)] -> Env
 parseEnv [] = M.empty

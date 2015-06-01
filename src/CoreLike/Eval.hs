@@ -5,6 +5,7 @@ module CoreLike.Eval where
 import Control.Arrow (second)
 import Data.Binary (Binary)
 import Data.List (foldl')
+import Data.List ((\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
@@ -13,12 +14,11 @@ import qualified Language.Haskell.Exts as HSE
 import qualified Text.PrettyPrint.Leijen as PP
 
 import CoreLike.Parser
+import CoreLike.Simplify
 import CoreLike.Syntax
 import CoreLike.ToHSE
 
 import Debug.Trace
-
-type Env = M.Map Var Term
 
 data StackFrame
   = Apply Var
@@ -134,25 +134,25 @@ unwind v _ s =
             ++ "value: " ++ show v ++ "stack: " ++ show s
 
 -- | Unwind the whole stack. Focus may not be a value.
-unwindAll :: Term -> Env -> Stack -> (Term, Env)
-unwindAll t e [] = (t, e)
-unwindAll (Value v) e s@(f : fs) =
+unwindAll :: State -> (Term, Env)
+unwindAll (t, e, []) = (t, e)
+unwindAll (Value v, e, s@(f : fs)) =
     case unwind v e s of
-      Just (t, e', s') -> unwindAll t e' s'
+      Just st -> unwindAll st
       Nothing ->
         case f of
-          Apply arg -> unwindAll (App (Value v) arg) e fs
-          Scrutinise cases -> unwindAll (Case (Value v) cases) e fs
+          Apply arg -> unwindAll (App (Value v) arg, e, fs)
+          Scrutinise cases -> unwindAll (Case (Value v) cases, e, fs)
           PrimApply op vs ts ->
-            unwindAll (PrimOp op $ (map Value $ vs ++ [v]) ++ ts) e fs
-          Update var -> unwindAll (Value v) (M.insert var (Value v) e) fs
-unwindAll t e (Apply v : fs) = unwindAll (App t v) e fs
-unwindAll t e (Scrutinise cases : fs) = unwindAll (Case t cases) e fs
-unwindAll t e (PrimApply op vs ts : fs) =
-    unwindAll (PrimOp op $ map Value vs ++ ts ++ [t]) e fs
-unwindAll t e (Update v : fs) =
+            unwindAll (PrimOp op $ (map Value $ vs ++ [v]) ++ ts, e, fs)
+          Update var -> unwindAll (Value v, M.insert var (Value v) e, fs)
+unwindAll (t, e, Apply v : fs) = unwindAll (App t v, e, fs)
+unwindAll (t, e, Scrutinise cases : fs) = unwindAll (Case t cases, e, fs)
+unwindAll (t, e, PrimApply op vs ts : fs) =
+    unwindAll (PrimOp op $ map Value vs ++ ts ++ [t], e, fs)
+unwindAll (t, e, Update v : fs) =
     -- TODO: This looks dangerous -- may duplicate lots of work.
-    unwindAll t (M.insert v t e) fs
+    unwindAll (t, M.insert v t e, fs)
 
 applyPrimOp :: PrimOp -> [Value] -> Value
 applyPrimOp Add [Literal (Int i1), Literal (Int i2)] =
@@ -255,7 +255,7 @@ simplHeap env = M.map removeLinks env
 -- * Residual code generation
 
 residualize :: State -> Term
-residualize (term, env, []) = LetRec (M.toList env) term
+residualize (term, env, []) = simpl $ LetRec (M.toList env) term
 residualize (term, env, Apply v : stack) = residualize (App term v, env, stack)
 residualize (term, env, Scrutinise cases : stack) =
     residualize (Case term cases, env, stack)
@@ -273,18 +273,45 @@ zipErr []       []       = []
 zipErr _        _        = error "zipErr: lengths are not equal"
 
 -- | evaluate -> split -> recurse
-evalSplit :: State -> State
-evalSplit s = splitEval $ maybe s fst $ eval s
+evalSplit :: Int -> State -> State
+evalSplit n s = splitEval n $ maybe s fst $ eval s
 
 -- | split -> evaluate -> recurse
-splitEval :: State -> State
-splitEval (v@(Value (Data _ args)), env, stack) =
+splitEval :: Int -> State -> State
+splitEval 0 s = s
+splitEval n (v@(Value (Data _ args)), env, stack) =
   let states = flip map args $ \arg -> (arg, (Var arg, , []))
-  in (v, , stack) $ foldl' (\e (a, s) ->
-        let (t, e', s') = evalSplit (s e)
-            (t', e'')   = unwindAll t e' s'
-         in M.insert a t' e'') env states
-splitEval s = s -- TODO: Implement this
+   in (v, , stack) $ foldl' (\e (a, s) ->
+         let (t, e', s') = evalSplit (n - 1) (s e)
+             (t', e'')   = unwindAll (t, e', s')
+          in M.insert a t' e'') env states
+splitEval n (Var v, env, Scrutinise cases : fs) =
+  let states = flip map cases $ \(con, rhs) ->
+        case con of
+          DataAlt dCon vs     ->
+            let v_fresh = head $ freshVarsInTerm rhs \\ [v] in
+            (substTerm v (Var v_fresh) rhs, M.insert v_fresh (Value $ Data dCon vs) env, [])
+          LiteralAlt lit      -> (rhs, M.insert v (Value $ Literal lit) env, [])
+          DefaultAlt (Just d) -> (rhs, M.insert d (Var v) env, [])
+   in (Var v, env,
+       Scrutinise
+         (zipWith (\c s -> (c,   residualize
+                               . filterEnvUnchanged env
+                               . uncurry (,,[])
+                               . unwindAll
+                               . evalSplit (n - 1)
+                               $ s))
+                  (map fst cases) states) : fs)
+splitEval n (Var v, env, Update v' : fs) = splitEval n (Var v, M.insert v' (Var v) env, fs)
+splitEval _ s = s -- TODO: Implement this
+
+filterEnvUnchanged :: Env -> State -> State
+filterEnvUnchanged e0 (t, e, s) = (t, M.filterWithKey f e, s)
+  where
+    f :: Var -> Term -> Bool
+    f v t = case M.lookup v e0 of
+              Nothing -> True
+              Just t' -> t /= t'
 
 -- | Splitting is only possible when evaluation is stuck or completed(WHNF).
 -- In other cases or if splitting is not possible for some reason, it returns
@@ -362,7 +389,7 @@ combineFold _ (_, (s, _)) =
 -- | Main routine for supercompilation
 
 drive :: State -> State
-drive = evalSplit
+drive = evalSplit 3 -- FIXME: limit splits to 10 for now
 
 -----------------------------------
 -- * Testing and utilities for REPL
@@ -373,6 +400,11 @@ initState path =
 
 setTerm :: String -> State -> (Either String State)
 setTerm termStr (_, env, stack) = (, env, stack) <$> parseTerm termStr
+
+initState' :: FilePath -> String -> IO State
+initState' path termStr = do
+    st <- either error id <$> initState path
+    return $ either error id $ setTerm termStr st
 
 ---------------------------
 -- * Pretty-printing states

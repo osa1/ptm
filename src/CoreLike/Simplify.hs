@@ -25,9 +25,27 @@ simpl (App f args)       = App (simpl f) args
 simpl (PrimOp op args)   = PrimOp op (map simpl args)
 -- Case-case transformation. We add this as a simplification pass since that's
 -- not really an operational semantics step.
+--
+-- FIXME: This is broken. Example test case:
+--
+--   case (case _ of { [] -> e1; x : xs -> e2 }) of
+--     [] -> e3
+--     y : ys -> .. x .. xs ..
+--
+-- Will be transformed to:
+--
+--   case _ of
+--      [] ->
+--        case e1 of
+--          [] -> e3
+--          y : ys -> .. x .. xs ..
+--      x : xs ->
+--        case e2 of
+--          [] -> e3
+--          y : ys -> .. x .. xs ..
+-- captured variables:   ^    ^^
 simpl (Case (Case scrt alts1) alts2) =
     simpl $ Case scrt (map (\(p, rhs) -> (p, Case rhs alts2)) alts1)
-
 simpl (Case scrt alts)   = Case (simpl scrt) (map (second simpl) alts)
 simpl (LetRec binds rhs) =
     let

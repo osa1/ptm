@@ -1,12 +1,18 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TupleSections #-}
 
 module Deforestation where
 
+import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
+import Data.String (IsString (..))
+
+-- import Debug.Trace
+
+trace _ = id
 
 type Var = String
 type Constr = String
@@ -17,6 +23,9 @@ data Term
   | App Var [Term]
   | Case Term [(Pat, Term)]
   deriving (Show)
+
+instance IsString Term where
+    fromString = Var
 
 data Pat = Pat Constr [Var]
   deriving (Show)
@@ -38,15 +47,22 @@ lookupFn e v = case M.lookup v e of
                    error $ "Can't find function " ++ v ++ " in env: " ++ show (M.keysSet e)
                  Just f -> f
 
-deforest :: Env -> Term -> TTerm
+type History = [(Var, [Term])] -- we only keep track of applications
+
+deforest :: Env -> Term -> State History TTerm
 -- rule 1
-deforest _   (Var v) = TVar v
+deforest _   (Var v) = trace "rule 1" $ return $ TVar v
 -- rule 2
-deforest env (Constr c ts) = TConstr c $ map (deforest env) ts
+deforest env (Constr c ts) = trace "rule 2" $ TConstr c <$> mapM (deforest env) ts
 -- rule 3
-deforest env t@(App v ts) =
-    let Fn args body = lookupFn env v
-     in if length args /= length ts
+deforest env t@(App v ts) = trace "rule 3" $ do
+    history <- get
+    if checkRenaming (v, ts) history
+      then return $ TVar "<<loop>>"
+      else do
+        let Fn args body = lookupFn env v
+        modify ((v, ts) :)
+        if length args /= length ts
           then error "Function arity doesn't match with # applied arguments"
           else
             -- Linearity means that each argument is used once in the body. This
@@ -56,12 +72,13 @@ deforest env t@(App v ts) =
 
             -- Careful with capturing here. Example case to be careful:
             --   (\x y -> ...) (... y ...) (...)
-            let args' = take (length args) (freshIn $ fvsTerm t)
-             in deforest env $ substTerms args' ts (substTerms args (map Var args') body)
+            let args' = take (length args) (freshIn $ fvsTerm t) in
+            deforest env $ substTerms args' ts (substTerms args (map Var args') body)
 -- rule 4
-deforest env (Case (Var v) cases) = TCase v $ map (second $ deforest env) cases
+deforest env (Case (Var v) cases) = trace "rule 4" $
+    TCase v <$> mapM (\(p, r) -> (p,) <$> deforest env r) cases
 -- rule 5
-deforest env (Case (Constr c ts) cases) =
+deforest env (Case (Constr c ts) cases) = trace "rule 5" $
     let (vs, rhs) = findCase cases
      in deforest env $ substTerms vs ts rhs
   where
@@ -70,27 +87,45 @@ deforest env (Case (Constr c ts) cases) =
       | c == con  = (vs, rhs)
       | otherwise = findCase cs
 -- rule 6
-deforest env t@(Case (App f ts) cases) =
-    let Fn args body = lookupFn env f
-     in if length args /= length ts
-          then error "Function arity doesn't match with # applied arguments"
-          else
-            -- see comments in rule (3)
-            let args' = take (length args) (freshIn $ fvsTerm t)
-             in deforest env $
-                  Case (substTerms args' ts (substTerms args (map Var args') body)) cases
+deforest env t@(Case (App f ts) cases) = trace "rule 6" $
+    let Fn args body = lookupFn env f in
+    if length args /= length ts
+      then error "Function arity doesn't match with # applied arguments"
+      else
+        -- see comments in rule (3)
+        let args' = take (length args) (freshIn $ fvsTerm t)
+         in deforest env $
+              Case (substTerms args' ts (substTerms args (map Var args') body)) cases
 -- rule 7
-deforest env tm@(Case (Case t cases) cases') =
+deforest env tm@(Case (Case t cases) cases') = trace "rule 7" $
     -- we should rename pattern variables in inner case to avoid capturing
     -- variables in outer case's RHSs (see also comments in CoreLike.Simplify
     -- for an example case)
 
-    -- use vsTerm instead of fvsTerm for clarity
-    let freshs = freshIn (vsTerm tm) in
     deforest env $ Case t $ flip map cases $ \(p@(Pat _ vs), rhs) ->
-      let renamings  = zip vs freshs
+      -- use vsTerm instead of fvsTerm for clarity
+      let renamings  = zip vs $ freshIn (vsTerm tm)
           (p', rhs') = renamePat renamings (p, rhs)
        in (p', Case rhs' cases')
+
+-- initial implementation, just return bool to blow to whistle
+isRenaming :: Term -> Term -> Bool
+-- isRenaming t1 t2
+--   | trace ("isRenaming: " ++ show t1 ++ " -- " ++ show t2) False = undefined
+isRenaming Var{} Var{} = True
+isRenaming (Constr c1 ts1) (Constr c2 ts2) =
+    c1 == c2 && length ts1 == length ts2 && and (zipWith isRenaming ts1 ts2)
+isRenaming (App f1 ts1) (App f2 ts2) =
+    f1 == f2 && length ts1 == length ts2 && and (zipWith isRenaming ts1 ts2)
+isRenaming Case{} Case{} = False -- TODO: Maybe improve this
+isRenaming _ _ = False
+
+checkRenaming :: (Var, [Term]) -> [(Var, [Term])] -> Bool
+checkRenaming (fName, args) history =
+    or $ map (\(f, as) -> isRenaming (App f as) (App fName args)) history
+
+------------------
+-- * Substitutions
 
 substTerms :: [Var] -> [Term] -> Term -> Term
 substTerms vs ts t0 = foldl' (\t (v, s) -> substTerm v s t) t0 (zip vs ts)
@@ -115,6 +150,10 @@ renamePat rs (Pat c vs, rhs) =
   ( Pat c (map (\v' -> fromMaybe v' (lookup v' rs)) vs)
   , uncurry substTerms (unzip (map (second Var) rs)) rhs )
 
+--------------------------------------------------------------------
+-- * Free and bound variables in terms and fresh variable generation
+
+-- | Free variables in given term.
 fvsTerm :: Term -> S.Set Var
 fvsTerm (Var v) = S.singleton v
 fvsTerm (Constr _ ts) = S.unions $ map fvsTerm ts
@@ -124,6 +163,7 @@ fvsTerm (Case t cases) = S.unions $ fvsTerm t : map fvsCase cases
 fvsCase :: (Pat, Term) -> S.Set Var
 fvsCase (Pat _ vs, rhs) = fvsTerm rhs `S.difference` S.fromList vs
 
+-- | All variables used in given term.
 vsTerm :: Term -> S.Set Var
 vsTerm (Var v) = S.singleton v
 vsTerm (Constr _ ts) = S.unions $ map vsTerm ts
@@ -149,7 +189,7 @@ append_fn =
 flip_fn :: Fn
 flip_fn =
   Fn ["zt"] $ Case (Var "zt")
-    [ (Pat "Leaf" ["z"], Var "z")
+    [ (Pat "Leaf" ["z"], Constr "Leaf" [Var "z"])
     , (Pat "Branch" ["xt", "yt"], Constr "Branch" [App "flip" [Var "yt"],
                                                    App "flip" [Var "xt"]])
     ]
@@ -167,6 +207,9 @@ flip_pgm :: Term
 flip_pgm = App "flip" [App "flip" [Var "zt"]]
 
 deforest' :: Term -> TTerm
-deforest' = deforest testEnv
+deforest' t = evalState (deforest testEnv t) []
 
-main = print $ deforest' append_pgm
+main :: IO ()
+main = do
+  print $ deforest' append_pgm
+  print $ deforest' flip_pgm

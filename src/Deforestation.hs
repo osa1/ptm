@@ -2,16 +2,17 @@
 
 module Deforestation where
 
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (foldl')
+import Data.List (deleteBy, foldl')
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
 import Data.String (IsString (..))
 
 -- import Debug.Trace
 
+trace :: String -> a -> a
 trace _ = id
 
 type Var = String
@@ -47,7 +48,8 @@ lookupFn e v = case M.lookup v e of
                    error $ "Can't find function " ++ v ++ " in env: " ++ show (M.keysSet e)
                  Just f -> f
 
-type History = [(Var, [Term])] -- we only keep track of applications
+-- we only keep track of applications
+type History = [(Var, [Term], Var {- function name -})]
 
 deforest :: Env -> Term -> State History TTerm
 -- rule 1
@@ -57,11 +59,11 @@ deforest env (Constr c ts) = trace "rule 2" $ TConstr c <$> mapM (deforest env) 
 -- rule 3
 deforest env t@(App v ts) = trace "rule 3" $ do
     history <- get
-    if checkRenaming (v, ts) history
-      then return $ TVar "<<loop>>"
-      else do
+    case checkRenaming (v, ts) history of
+      Just tt -> return tt
+      Nothing -> do
         let Fn args body = lookupFn env v
-        modify ((v, ts) :)
+        modify ((v, ts, 'h' : show (length history)) :)
         if length args /= length ts
           then error "Function arity doesn't match with # applied arguments"
           else
@@ -101,28 +103,43 @@ deforest env tm@(Case (Case t cases) cases') = trace "rule 7" $
     -- we should rename pattern variables in inner case to avoid capturing
     -- variables in outer case's RHSs (see also comments in CoreLike.Simplify
     -- for an example case)
-
     deforest env $ Case t $ flip map cases $ \(p@(Pat _ vs), rhs) ->
       -- use vsTerm instead of fvsTerm for clarity
       let renamings  = zip vs $ freshIn (vsTerm tm)
           (p', rhs') = renamePat renamings (p, rhs)
        in (p', Case rhs' cases')
 
--- initial implementation, just return bool to blow to whistle
-isRenaming :: Term -> Term -> Bool
--- isRenaming t1 t2
---   | trace ("isRenaming: " ++ show t1 ++ " -- " ++ show t2) False = undefined
-isRenaming Var{} Var{} = True
-isRenaming (Constr c1 ts1) (Constr c2 ts2) =
-    c1 == c2 && length ts1 == length ts2 && and (zipWith isRenaming ts1 ts2)
-isRenaming (App f1 ts1) (App f2 ts2) =
-    f1 == f2 && length ts1 == length ts2 && and (zipWith isRenaming ts1 ts2)
-isRenaming Case{} Case{} = False -- TODO: Maybe improve this
-isRenaming _ _ = False
+isRenaming :: Term -> Term -> Maybe [(Var, Var)]
+isRenaming (Var v1) (Var v2) = Just [(v1, v2)]
+isRenaming (Constr c1 ts1) (Constr c2 ts2) = do
+    guard $ c1 == c2
+    guard $ length ts1 == length ts2
+    mapM (uncurry isRenaming) (zip ts1 ts2) >>= tryJoinRs . concat
+isRenaming (App fs1 ts1) (App fs2 ts2) = do
+    guard $ fs1 == fs2
+    guard $ length ts1 == length ts2
+    mapM (uncurry isRenaming) (zip ts1 ts2) >>= tryJoinRs . concat
+isRenaming Case{} Case{} = Nothing -- TODO: Maybe improve this
+isRenaming _ _ = Nothing
 
-checkRenaming :: (Var, [Term]) -> [(Var, [Term])] -> Bool
-checkRenaming (fName, args) history =
-    or $ map (\(f, as) -> isRenaming (App f as) (App fName args)) history
+tryJoinRs :: [(Var, Var)] -> Maybe [(Var, Var)]
+tryJoinRs [] = Just []
+tryJoinRs ((r, l) : rest) =
+    case lookup r rest of
+      Nothing -> ((r, l) :) <$> tryJoinRs rest
+      Just l'
+        | l == l'   ->
+            tryJoinRs ((r, l) : deleteBy (\(r1, _) (r2, _) -> r1 == r2) (r, l) rest)
+        | otherwise -> Nothing
+
+checkRenaming :: (Var, [Term]) -> History -> Maybe TTerm
+checkRenaming (fName, args) = iter
+  where
+    iter [] = Nothing
+    iter ((f, as, h) : rest) =
+      case isRenaming (App f as) (App fName args) of
+        Just substs -> trace ("~~~found renaming:\n" ++ show (App f as) ++ "\n" ++ show (App fName args) ++ "\n" ++ show substs) $ Just $ TApp h (map snd substs)
+        Nothing     -> iter rest
 
 ------------------
 -- * Substitutions

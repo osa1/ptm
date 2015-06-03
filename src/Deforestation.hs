@@ -306,6 +306,31 @@ nameVar :: HSE.Name -> Var
 nameVar (HSE.Ident s)  = s
 nameVar (HSE.Symbol s) = s
 
+toHSE :: TTerm -> HSE.Exp
+toHSE (TVar v) = HSE.Var (HSE.UnQual (HSE.Ident v))
+toHSE (TConstr constr ts) =
+    foldl' (\e t -> HSE.App e (toHSE t)) (HSE.Con (HSE.UnQual (HSE.Ident constr))) ts
+toHSE (TApp v0 vs) =
+    foldl' (\e v -> HSE.App e (HSE.Var (HSE.UnQual (HSE.Ident v))))
+           (HSE.Var (HSE.UnQual (HSE.Ident v0))) vs
+toHSE (TCase v ps) = HSE.Case (toHSE (TVar v)) $ flip map ps $ \(Pat c vs, rhs) ->
+                       HSE.Alt dummyLoc
+                               (HSE.PApp (HSE.UnQual $ HSE.Ident c)
+                                         (map (HSE.PVar . HSE.Ident) vs))
+                               (HSE.UnGuardedRhs $ toHSE rhs)
+                               (HSE.BDecls [])
+
+ppTTerm :: TTerm -> String
+ppTTerm = HSE.prettyPrint . toHSE
+
+ppFn :: (Var, [Var], TTerm) -> String
+ppFn (fName, args, body) = HSE.prettyPrint $ HSE.FunBind
+    [ HSE.Match dummyLoc (HSE.Ident fName) (map (HSE.PVar . HSE.Ident) args) Nothing
+                (HSE.UnGuardedRhs $ toHSE body) (HSE.BDecls []) ]
+
+dummyLoc :: HSE.SrcLoc
+dummyLoc = HSE.SrcLoc "" 0 0
+
 append_str :: String
 append_str = unlines
   [ "case xs of"
@@ -317,5 +342,10 @@ append_str = unlines
 
 main :: IO ()
 main = do
-    print $ deforest' append_pgm
-    print $ deforest' flip_pgm
+    let (pgm1, decls1) = deforest' append_pgm
+        (pgm2, decls2) = deforest' flip_pgm
+    forM_ decls1 $ putStrLn . ppFn
+    putStrLn $ ppTTerm pgm1
+    putStrLn "~~~~~~~~~~~~~~~~~~~~~"
+    forM_ decls2 $ putStrLn . ppFn
+    putStrLn $ ppTTerm pgm2

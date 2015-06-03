@@ -6,7 +6,7 @@ import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import Data.List (deleteBy, foldl')
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Data.String (IsString (..))
 
@@ -48,25 +48,31 @@ lookupFn e v = case M.lookup v e of
                    error $ "Can't find function " ++ v ++ " in env: " ++ show (M.keysSet e)
                  Just f -> f
 
--- we only keep track of applications
 type History = [(Var, [Term], Var {- function name -})]
 
-deforest :: Env -> Term -> State History TTerm
+-- we only keep track of applications
+data DState = DState
+  { history :: History
+  , defs    :: [(Var, [Var], TTerm)]
+  }
+
+deforest :: Env -> Term -> State DState TTerm
 -- rule 1
 deforest _   (Var v) = trace "rule 1" $ return $ TVar v
 -- rule 2
 deforest env (Constr c ts) = trace "rule 2" $ TConstr c <$> mapM (deforest env) ts
 -- rule 3
 deforest env t@(App v ts) = trace "rule 3" $ do
-    history <- get
-    case checkRenaming (v, ts) history of
+    hist <- gets history
+    case checkRenaming (v, ts) hist of
       Just tt -> return tt
       Nothing -> do
         let Fn args body = lookupFn env v
-        modify ((v, ts, 'h' : show (length history)) :)
         if length args /= length ts
           then error "Function arity doesn't match with # applied arguments"
-          else
+          else do
+            let hName = 'h' : show (length hist)
+            modify $ \s -> s{history = ((v, ts, hName) : hist)}
             -- Linearity means that each argument is used once in the body. This
             -- is how we guarantee that there won't be work duplication.
             -- TODO: We don't check for it though. How to guarantee that there
@@ -74,8 +80,11 @@ deforest env t@(App v ts) = trace "rule 3" $ do
 
             -- Careful with capturing here. Example case to be careful:
             --   (\x y -> ...) (... y ...) (...)
-            let args' = take (length args) (freshIn $ fvsTerm t) in
-            deforest env $ substTerms args' ts (substTerms args (map Var args') body)
+            let fvs = S.delete v $ fvsTerm t
+                args' = take (length args) (freshIn fvs)
+            tt <- deforest env $ substTerms args' ts (substTerms args (map Var args') body)
+            modify $ \s -> s{defs = (hName, S.toList fvs, tt) : defs s}
+            return tt
 -- rule 4
 deforest env (Case (Var v) cases) = trace "rule 4" $
     TCase v <$> mapM (\(p, r) -> (p,) <$> deforest env r) cases
@@ -195,6 +204,15 @@ vsCase (Pat _ vs, rhs) = vsTerm rhs `S.union` S.fromList vs
 freshIn :: S.Set Var -> [Var]
 freshIn vs = filter (not . flip S.member vs) $ map (("v_" ++) . show) [0 :: Int ..]
 
+fvsTT :: TTerm -> S.Set Var
+fvsTT (TVar v) = S.singleton v
+fvsTT (TConstr _ ts) = S.unions $ map fvsTT ts
+fvsTT (TApp f vs) = S.fromList $ f : vs
+fvsTT (TCase v cases) = S.insert v $ S.unions $ map fvsTCase cases
+  where
+    fvsTCase :: (Pat, TTerm) -> S.Set Var
+    fvsTCase (Pat _ vs, rhs) = fvsTT rhs `S.difference` (S.fromList vs)
+
 ------------------------------------------------
 -- * Example functions, programs and environment
 
@@ -225,10 +243,13 @@ append_pgm = App "append" [App "append" [Var "xs", Var "ys"], Var "zs"]
 flip_pgm :: Term
 flip_pgm = App "flip" [App "flip" [Var "zt"]]
 
-deforest' :: Term -> TTerm
-deforest' t = evalState (deforest testEnv t) []
+deforest' :: Term -> (TTerm, [(Var, [Var], TTerm)])
+deforest' t =
+    let (tt, DState _ ds) = runState (deforest testEnv t) (DState [] [])
+        fvs = fvsTT tt
+     in (tt, filter (\(hName, _, _) -> hName `S.member` fvs) ds)
 
 main :: IO ()
 main = do
-  print $ deforest' append_pgm
-  print $ deforest' flip_pgm
+    print $ deforest' append_pgm
+    print $ deforest' flip_pgm

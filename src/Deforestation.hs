@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, OverloadedStrings, TupleSections #-}
 
 module Deforestation where
 
@@ -138,7 +138,7 @@ checkRenaming (fName, args) = iter
     iter [] = Nothing
     iter ((f, as, h) : rest) =
       case isRenaming (App f as) (App fName args) of
-        Just substs -> trace ("~~~found renaming:\n" ++ show (App f as) ++ "\n" ++ show (App fName args) ++ "\n" ++ show substs) $ Just $ TApp h (map snd substs)
+        Just substs -> Just $ TApp h (map snd substs)
         Nothing     -> iter rest
 
 ------------------
@@ -156,11 +156,13 @@ substTerm v t (App f body) = App f (map (substTerm v t) body)
 substTerm v t (Case scrt cases) = Case (substTerm v t scrt) (map substCase cases)
   where
     substCase :: (Pat, Term) -> (Pat, Term)
-    substCase p@(Pat _ vs, rhs) =
-      let captures = S.toList $ S.fromList vs `S.intersection` fvsTerm t
-          renamings = zip captures (freshIn (fvsTerm rhs `S.union` S.fromList vs
-                                                         `S.union` fvsTerm t))
-       in second (substTerm v t) $ renamePat renamings p
+    substCase p@(Pat _ vs, rhs)
+      | v `elem` vs = p
+      | otherwise =
+          let captures = S.toList $ S.fromList vs `S.intersection` fvsTerm t
+              renamings = zip captures $ freshIn $
+                S.insert v $ fvsTerm rhs `S.union` S.fromList vs `S.union` fvsTerm t
+           in second (substTerm v t) $ renamePat renamings p
 
 renamePat :: [(Var, Var)] -> (Pat, Term) -> (Pat, Term)
 renamePat rs (Pat c vs, rhs) =

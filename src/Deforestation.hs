@@ -5,7 +5,7 @@ module Deforestation where
 
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (deleteBy, foldl', (\\))
+import Data.List (deleteBy, foldl', sortBy, (\\))
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
@@ -198,7 +198,7 @@ checkAppRenaming (fName, args) h0 = iter [ (v, ts, h) | (FunCall v ts, h) <- h0 
     iter [] = Nothing
     iter ((f, as, h) : rest) =
       case isRenaming (App f as) (App fName args) of
-        Just substs -> Just $ TApp h (map snd substs)
+        Just substs -> Just $ TApp h (map snd $ sortBy (\(v1, _) (v2, _) -> v1 `compare` v2) substs)
         Nothing     -> iter rest
 
 checkCaseRenaming :: (Term, [(Pat, Term)]) -> History -> Maybe TTerm
@@ -207,7 +207,8 @@ checkCaseRenaming (scrt, cases) h0 = iter [ (t, cs, h) | (Match t cs, h) <- h0 ]
     iter [] = Nothing
     iter ((scrt', cases', h) : rest) =
       case isRenaming (Case scrt' cases') (Case scrt cases) of
-        Just substs -> Just $ TApp h (map snd substs)
+        Just substs ->
+            Just $ TApp h (map snd $ sortBy (\(v1, _) (v2, _) -> v1 `compare` v2) substs)
         Nothing     -> iter rest
 
 ------------------
@@ -404,7 +405,7 @@ simplTerm env tt@(TApp f as) =
       Nothing -> tt
       Just (as', TApp f' as'') ->
         let m = zip as' as in
-        TApp f' $ map (\v -> fromMaybe v (lookup v m)) as''
+        simplTerm env $ TApp f' $ map (\v -> fromMaybe v (lookup v m)) as''
       Just _ -> tt
 simplTerm env (TConstr c ts) = TConstr c $ map (simplTerm env) ts
 simplTerm env (TCase v cases) = TCase v $ flip map cases $

@@ -5,14 +5,14 @@ module Deforestation where
 
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (deleteBy, foldl')
+import Data.List (deleteBy, foldl', (\\))
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
 import Data.String (IsString (..))
 import qualified Language.Haskell.Exts as HSE
 
--- import Debug.Trace
+-- import qualified Debug.Trace
 
 trace :: String -> a -> a
 trace _ = id
@@ -50,7 +50,12 @@ lookupFn e v = case M.lookup v e of
                    error $ "Can't find function " ++ v ++ " in env: " ++ show (M.keysSet e)
                  Just f -> f
 
-type History = [(Var, [Term], Var {- function name -})]
+data Hist
+  = FunCall Var [Term]
+  | Match Term [(Pat, Term)]
+  deriving (Show)
+
+type History = [(Hist, Var {- function name -})]
 
 -- we only keep track of applications
 data DState = DState
@@ -66,7 +71,7 @@ deforest env (Constr c ts) = trace "rule 2" $ TConstr c <$> mapM (deforest env) 
 -- rule 3
 deforest env t@(App v ts) = trace "rule 3" $ do
     hist <- gets history
-    case checkRenaming (v, ts) hist of
+    case checkAppRenaming (v, ts) hist of
       Just tt -> return tt
       Nothing -> do
         let Fn args body = lookupFn env v
@@ -74,7 +79,7 @@ deforest env t@(App v ts) = trace "rule 3" $ do
           then error "Function arity doesn't match with # applied arguments"
           else do
             let hName = 'h' : show (length hist)
-            modify $ \s -> s{history = ((v, ts, hName) : hist)}
+            modify $ \s -> s{history = ((FunCall v ts, hName) : hist)}
             -- Linearity means that each argument is used once in the body. This
             -- is how we guarantee that there won't be work duplication.
             -- TODO: We don't check for it though. How to guarantee that there
@@ -82,14 +87,23 @@ deforest env t@(App v ts) = trace "rule 3" $ do
 
             -- Careful with capturing here. Example case to be careful:
             --   (\x y -> ...) (... y ...) (...)
-            let fvs = S.delete v $ fvsTerm t
+            let fvs = fvsTerm t `S.difference` M.keysSet env
                 args' = take (length args) (freshIn fvs)
-            tt <- deforest env $ substTerms args' ts (substTerms args (map Var args') body)
-            modify $ \s -> s{defs = (hName, S.toList fvs, tt) : defs s}
-            return tt
+            ret <- deforest env $ substTerms args' ts (substTerms args (map Var args') body)
+            modify $ \s -> s{defs = (hName, S.toList fvs, ret) : defs s}
+            return $ TApp hName (S.toList fvs)
 -- rule 4
-deforest env (Case (Var v) cases) = trace "rule 4" $
-    TCase v <$> mapM (\(p, r) -> (p,) <$> deforest env r) cases
+deforest env t@(Case (Var v) cases) = trace "rule 4" $ do
+    hist <- gets history
+    case checkCaseRenaming (Var v, cases) hist of
+      Just tt -> return tt
+      Nothing -> do
+        let hName = 'h' : show (length hist)
+        modify $ \s -> s{history = ((Match (Var v) cases, hName) : hist)}
+        let fvs = fvsTerm t `S.difference` M.keysSet env
+        ret <- TCase v <$> mapM (\(p, r) -> (p,) <$> deforest env r) cases
+        modify $ \s -> s{defs = (hName, S.toList fvs, ret) : defs s}
+        return $ TApp hName (S.toList fvs)
 -- rule 5
 deforest env (Case (Constr c ts) cases) = trace "rule 5" $
     let (vs, rhs) = findCase cases
@@ -100,15 +114,29 @@ deforest env (Case (Constr c ts) cases) = trace "rule 5" $
       | c == con  = (vs, rhs)
       | otherwise = findCase cs
 -- rule 6
-deforest env t@(Case (App f ts) cases) = trace "rule 6" $
-    let Fn args body = lookupFn env f in
-    if length args /= length ts
-      then error "Function arity doesn't match with # applied arguments"
-      else
-        -- see comments in rule (3)
-        let args' = take (length args) (freshIn $ fvsTerm t)
-         in deforest env $
-              Case (substTerms args' ts (substTerms args (map Var args') body)) cases
+deforest env t@(Case (App f ts) cases) = trace "rule 6" $ do
+    let Fn args body = lookupFn env f
+    let fvs = fvsTerm t `S.difference` M.keysSet env
+        args' = take (length args) (freshIn  fvs)
+    deforest env $
+      Case (substTerms args' ts (substTerms args (map Var args') body)) cases
+    -- hist <- gets history
+    -- case checkCaseRenaming (App f ts, cases) hist of
+    --   Just tt -> return tt
+    --   Nothing -> do
+    --     let hName = 'h' : show (length hist)
+    --     modify $ \s -> s{history = ((Match (App f ts) cases, hName) : hist)}
+    --     let Fn args body = lookupFn env f
+    --     if length args /= length ts
+    --       then error "Function arity doesn't match with # applied arguments"
+    --       else do
+    --         -- see comments in rule (3)
+    --         let fvs = fvsTerm t `S.difference` M.keysSet env
+    --             args' = take (length args) (freshIn  fvs)
+    --         ret <- deforest env $
+    --                  Case (substTerms args' ts (substTerms args (map Var args') body)) cases
+    --         modify $ \s -> s{defs = (hName, S.toList fvs, ret) : defs s}
+    --         return $ TApp hName (S.toList fvs)
 -- rule 7
 deforest env tm@(Case (Case t cases) cases') = trace "rule 7" $
     -- we should rename pattern variables in inner case to avoid capturing
@@ -130,7 +158,28 @@ isRenaming (App fs1 ts1) (App fs2 ts2) = do
     guard $ fs1 == fs2
     guard $ length ts1 == length ts2
     mapM (uncurry isRenaming) (zip ts1 ts2) >>= tryJoinRs . concat
-isRenaming Case{} Case{} = Nothing -- TODO: Maybe improve this
+
+isRenaming (Case t1 cases1) (Case t2 cases2) = do
+    guard $ length cases1 == length cases2
+    rs1 <- isRenaming t1 t2
+    -- TODO: Should I sort cases by constructor name before this?
+    casesRs <- forM (zip cases1 cases2) $ \((Pat c1 vs1, rhs1), (Pat c2 vs2, rhs2)) -> do
+      guard $ c1 == c2
+      let binderRs = zip vs1 vs2
+      rhsRs <- isRenaming rhs1 rhs2
+      -- binders should be renamed according to `binderRs`, otherwise we fail
+      (\\ binderRs) <$> tryJoinRs rhsRs >>= tryJoinBinderRs binderRs
+    tryJoinRs $ rs1 ++ concat casesRs
+  where
+    tryJoinBinderRs :: [(Var, Var)] -> [(Var, Var)] -> Maybe [(Var, Var)]
+    tryJoinBinderRs _ [] = Just []
+    tryJoinBinderRs binderRs ((v1, v2) : rest) =
+      case lookup v1 binderRs of
+        Nothing -> ((v1, v2) :) <$> tryJoinBinderRs binderRs rest
+        Just v2'
+          | v2 == v2' -> tryJoinBinderRs binderRs rest
+          | otherwise -> Nothing
+
 isRenaming _ _ = Nothing
 
 tryJoinRs :: [(Var, Var)] -> Maybe [(Var, Var)]
@@ -143,12 +192,21 @@ tryJoinRs ((r, l) : rest) =
             tryJoinRs ((r, l) : deleteBy (\(r1, _) (r2, _) -> r1 == r2) (r, l) rest)
         | otherwise -> Nothing
 
-checkRenaming :: (Var, [Term]) -> History -> Maybe TTerm
-checkRenaming (fName, args) = iter
+checkAppRenaming :: (Var, [Term]) -> History -> Maybe TTerm
+checkAppRenaming (fName, args) h0 = iter [ (v, ts, h) | (FunCall v ts, h) <- h0 ]
   where
     iter [] = Nothing
     iter ((f, as, h) : rest) =
       case isRenaming (App f as) (App fName args) of
+        Just substs -> Just $ TApp h (map snd substs)
+        Nothing     -> iter rest
+
+checkCaseRenaming :: (Term, [(Pat, Term)]) -> History -> Maybe TTerm
+checkCaseRenaming (scrt, cases) h0 = iter [ (t, cs, h) | (Match t cs, h) <- h0 ]
+  where
+    iter [] = Nothing
+    iter ((scrt', cases', h) : rest) =
+      case isRenaming (Case scrt' cases') (Case scrt cases) of
         Just substs -> Just $ TApp h (map snd substs)
         Nothing     -> iter rest
 
@@ -245,11 +303,10 @@ append_pgm = App "append" [App "append" [Var "xs", Var "ys"], Var "zs"]
 flip_pgm :: Term
 flip_pgm = App "flip" [App "flip" [Var "zt"]]
 
-deforest' :: Term -> (TTerm, [(Var, [Var], TTerm)])
+deforest' :: Term -> ([(Var, [Var], TTerm)], TTerm)
 deforest' t =
     let (tt, DState _ ds) = runState (deforest testEnv t) (DState [] [])
-        fvs = fvsTT tt
-     in (tt, filter (\(hName, _, _) -> hName `S.member` fvs) ds)
+     in (ds, tt)
 
 -------------------------
 -- * Parsing and printing
@@ -323,8 +380,8 @@ toHSE (TCase v ps) = HSE.Case (toHSE (TVar v)) $ flip map ps $ \(Pat c vs, rhs) 
 ppTTerm :: TTerm -> String
 ppTTerm = HSE.prettyPrint . toHSE
 
-ppFn :: (Var, [Var], TTerm) -> String
-ppFn (fName, args, body) = HSE.prettyPrint $ HSE.FunBind
+ppFn :: (Var, ([Var], TTerm)) -> String
+ppFn (fName, (args, body)) = HSE.prettyPrint $ HSE.FunBind
     [ HSE.Match dummyLoc (HSE.Ident fName) (map (HSE.PVar . HSE.Ident) args) Nothing
                 (HSE.UnGuardedRhs $ toHSE body) (HSE.BDecls []) ]
 
@@ -340,12 +397,52 @@ append_str = unlines
 
 --
 
+simplTerm :: M.Map Var ([Var], TTerm) -> TTerm -> TTerm
+simplTerm _ v@TVar{} = v
+simplTerm env tt@(TApp f as) =
+    case M.lookup f env of
+      Nothing -> tt
+      Just (as', TApp f' as'') ->
+        let m = zip as' as in
+        TApp f' $ map (\v -> fromMaybe v (lookup v m)) as''
+      Just _ -> tt
+simplTerm env (TConstr c ts) = TConstr c $ map (simplTerm env) ts
+simplTerm env (TCase v cases) = TCase v $ flip map cases $
+    \(Pat c as, rhs) -> (Pat c as, simplTerm (foldl' (flip M.delete) env as) rhs)
+
+simplDefs :: [(Var, [Var], TTerm)] -> TTerm -> (M.Map Var ([Var], TTerm) , TTerm)
+simplDefs ds term =
+    let ds' = M.fromList $ map (\(f, as, body) -> (f, (as, body))) ds in
+    (M.map (\(as, body) -> (as, simplTerm (foldl' (flip M.delete) ds' as) body)) ds'
+    ,simplTerm ds' term)
+
+lookupDef :: Var -> [(Var, [Var], TTerm)] -> Maybe (Var, [Var], TTerm)
+lookupDef v = lookup v . map (\h@(f,_,_) -> (f, h))
+
+gc :: M.Map Var ([Var], TTerm) -> TTerm -> M.Map Var ([Var], TTerm)
+gc env0 root =
+    closure (M.fromList $ lookupVs $ S.toList $ fvsTT root)
+  where
+    lookupVs = mapMaybe (\v -> (v,) <$> M.lookup v env0)
+
+    closure :: M.Map Var ([Var], TTerm) -> M.Map Var ([Var], TTerm)
+    closure env =
+      let fvs = S.toList $ S.unions $ map (fvsTT . snd . snd) $ M.toList env
+          env' = M.fromList $ lookupVs fvs
+       in if M.size env' == M.size env then env else closure env'
+
+deleteDef :: Var -> [(Var, [Var], TTerm)] -> [(Var, [Var], TTerm)]
+deleteDef _ [] = []
+deleteDef v (d@(v', _, _) : rest)
+  | v == v'   = rest
+  | otherwise = d : deleteDef v rest
+
 main :: IO ()
 main = do
-    let (pgm1, decls1) = deforest' append_pgm
-        (pgm2, decls2) = deforest' flip_pgm
-    forM_ decls1 $ putStrLn . ppFn
+    let (decls1, pgm1) = uncurry simplDefs $ deforest' append_pgm
+        (decls2, pgm2) = uncurry simplDefs $ deforest' flip_pgm
+    forM_ (M.toList $ gc decls1 pgm1) $ putStrLn . ppFn
     putStrLn $ ppTTerm pgm1
     putStrLn "~~~~~~~~~~~~~~~~~~~~~"
-    forM_ decls2 $ putStrLn . ppFn
+    forM_ (M.toList $ gc decls2 pgm2) $ putStrLn . ppFn
     putStrLn $ ppTTerm pgm2

@@ -21,6 +21,10 @@ library
     CoreLike.Step
     CoreLike.Syntax
     CoreLike.ToHSE
+    Deforestation.Deforest
+    Deforestation.Parser
+    Deforestation.Syntax
+    Deforestation.ToHSE
 
   build-depends:
     base >=4.8 && <4.9,

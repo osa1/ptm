@@ -1,10 +1,14 @@
+{-# LANGUAGE DeriveAnyClass, DeriveGeneric #-}
+
 module Deforestation.Syntax where
 
+import Control.DeepSeq (NFData)
 import Data.Bifunctor (second)
 import Data.List (foldl')
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Data.String (IsString (..))
+import GHC.Generics (Generic)
 
 type Var = String
 type Constr = String
@@ -14,20 +18,20 @@ data Term
   | Constr Constr [Term]
   | App Var [Term]
   | Case Term [(Pat, Term)]
-  deriving (Show)
+  deriving (Show, Generic, NFData)
 
 instance IsString Term where
     fromString = Var
 
 data Pat = Pat Constr [Var]
-  deriving (Show)
+  deriving (Show, Generic, NFData)
 
 data TTerm
   = TVar Var
   | TConstr Constr [TTerm]
   | TApp Var [Var]
   | TCase Var [(Pat, TTerm)]
-  deriving (Show)
+  deriving (Show, Generic, NFData)
 
 ------------------
 -- * Substitutions

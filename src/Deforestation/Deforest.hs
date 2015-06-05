@@ -1,24 +1,24 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, OverloadedStrings,
-             TupleSections #-}
+{-# LANGUAGE BangPatterns, GeneralizedNewtypeDeriving, LambdaCase,
+             OverloadedStrings, TupleSections #-}
 
 module Deforestation.Deforest where
 
+import Control.DeepSeq (force)
 import Control.Monad.State.Strict
 import Data.List (deleteBy, foldl', sortBy, (\\))
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
-import qualified Language.Haskell.Exts as HSE
 
 import Deforestation.Parser
 import Deforestation.Syntax
 import Deforestation.ToHSE
 
 -- import qualified Debug.Trace
--- import Debug.Trace
+import Debug.Trace
 
-trace :: String -> a -> a
-trace _ = id
+-- trace :: String -> a -> a
+-- trace _ = id
 
 data Fn = Fn [Var] Term deriving (Show)
 
@@ -43,13 +43,16 @@ data DState = DState
   , defs    :: [(Var, [Var], TTerm)]
   }
 
+traceRule :: Int -> Term -> a -> a
+traceRule i t = trace ("rule " ++ show i ++ " - " ++ ppTerm t)
+
 deforest :: Env -> Term -> State DState TTerm
 -- rule 1
-deforest _   (Var v) = trace "rule 1" $ return $ TVar v
+deforest _   t@(Var v) = traceRule 1 t $ return $ TVar v
 -- rule 2
-deforest env (Constr c ts) = trace "rule 2" $ TConstr c <$> mapM (deforest env) ts
+deforest env t@(Constr c ts) = traceRule 2 t $ TConstr c <$> mapM (deforest env) ts
 -- rule 3
-deforest env t@(App v ts) = trace "rule 3" $ do
+deforest env t@(App v ts) = traceRule 3 t $ do
     hist <- gets history
     case checkAppRenaming (v, ts) hist of
       Just tt -> return tt
@@ -73,7 +76,7 @@ deforest env t@(App v ts) = trace "rule 3" $ do
             modify $ \s -> s{defs = (hName, S.toList fvs, ret) : defs s}
             return $ TApp hName (S.toList fvs)
 -- rule 4
-deforest env t@(Case (Var v) cases) = trace "rule 4" $ do
+deforest env t@(Case (Var v) cases) = traceRule 4 t $ do
     hist <- gets history
     case checkCaseRenaming (Var v, cases) hist of
       Just tt -> return tt
@@ -85,7 +88,7 @@ deforest env t@(Case (Var v) cases) = trace "rule 4" $ do
         modify $ \s -> s{defs = (hName, S.toList fvs, ret) : defs s}
         return $ TApp hName (S.toList fvs)
 -- rule 5
-deforest env (Case (Constr c ts) cases) = trace "rule 5" $
+deforest env t@(Case (Constr c ts) cases) = traceRule 5 t $
     let (vs, rhs) = findCase cases
      in deforest env $ substTerms vs ts rhs
   where
@@ -94,7 +97,7 @@ deforest env (Case (Constr c ts) cases) = trace "rule 5" $
       | c == con  = (vs, rhs)
       | otherwise = findCase cs
 -- rule 6
-deforest env t@(Case (App f ts) cases) = trace "rule 6" $ do
+deforest env t@(Case (App f ts) cases) = traceRule 6 t $ do
     -- let Fn args body = lookupFn env f
     -- let fvs = fvsTerm t `S.difference` M.keysSet env
     --     args' = take (length args) (freshIn  fvs)
@@ -118,7 +121,7 @@ deforest env t@(Case (App f ts) cases) = trace "rule 6" $ do
             modify $ \s -> s{defs = (hName, S.toList fvs, ret) : defs s}
             return $ TApp hName (S.toList fvs)
 -- rule 7
-deforest env tm@(Case (Case t cases) cases') = trace "rule 7" $
+deforest env tm@(Case (Case t cases) cases') = traceRule 7 tm $
     -- we should rename pattern variables in inner case to avoid capturing
     -- variables in outer case's RHSs (see also comments in CoreLike.Simplify
     -- for an example case)
@@ -249,9 +252,6 @@ deforest' t =
     let (tt, DState _ ds) = runState (deforest testEnv t) (DState [] [])
      in (ds, tt)
 
-ppTTerm :: TTerm -> String
-ppTTerm = HSE.prettyPrint . toHSE
-
 --
 
 simplTerm :: M.Map Var ([Var], TTerm) -> TTerm -> TTerm
@@ -274,8 +274,8 @@ simplDefs ds term =
     ,simplTerm ds' term)
 
 gc :: M.Map Var ([Var], TTerm) -> TTerm -> M.Map Var ([Var], TTerm)
-gc env0 root = env0
-    -- closure (M.fromList $ lookupVs $ S.toList $ fvsTT root)
+gc env0 root =
+    closure (M.fromList $ lookupVs $ S.toList $ fvsTT root)
   where
     lookupVs = mapMaybe (\v -> (v,) <$> M.lookup v env0)
 
@@ -285,29 +285,20 @@ gc env0 root = env0
           env' = M.fromList $ lookupVs fvs
        in if M.size env' == M.size env then env else closure env'
 
+deforestPrint :: Term -> IO ()
+deforestPrint t = do
+    -- forcing here to run `Debug.Trace.trace` calls
+    -- (also need a bang pattern to not thunk `force` call)
+    let !(decls, pgm) = force $ uncurry simplDefs $ deforest' t
+    putStrLn "---"
+    forM_ (M.toList $ gc decls pgm) $ putStrLn . ppFn
+    putStrLn $ ppTTerm pgm
+    putStrLn "---"
+
 main :: IO ()
-main = do
-    let (decls1, pgm1) = uncurry simplDefs $ deforest' append_pgm
-    --     (decls2, pgm2) = uncurry simplDefs $ deforest' flip_pgm
-
-    forM_ (M.toList $ gc decls1 pgm1) $ putStrLn . ppFn
-    putStrLn $ ppTTerm pgm1
-
-    putStrLn "~~~~~~~~~~~~~~~~~~~~~"
-    let (decls2, pgm2) = uncurry simplDefs $ deforest' append_pgm1
-    forM_ (M.toList $ gc decls2 pgm2) $ putStrLn . ppFn
-    putStrLn $ ppTTerm pgm2
-
-    putStrLn "~~~~~~~~~~~~~~~~~~~~~"
-    let (decls3, pgm3) = uncurry simplDefs $ deforest' append_pgm2
-    forM_ (M.toList $ gc decls3 pgm3) $ putStrLn . ppFn
-    putStrLn $ ppTTerm pgm3
-
-    -- putStrLn "~~~~~~~~~~~~~~~~~~~~~"
-    -- forM_ (M.toList $ gc decls2 pgm2) $ putStrLn . ppFn
-    -- putStrLn $ ppTTerm pgm2
-
-    let (decls3, pgm3) = uncurry simplDefs $ deforest' reverse_pgm
-    putStrLn "~~~~~~~~~~~~~~~~~~~~~"
-    forM_ (M.toList $ gc decls3 pgm3) $ putStrLn . ppFn
-    putStrLn $ ppTTerm pgm3
+main = mapM_ deforestPrint
+    [ append_pgm
+    , append_pgm1
+    , append_pgm2
+    , flip_pgm
+    ]

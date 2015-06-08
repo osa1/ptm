@@ -1,0 +1,29 @@
+<!doctype html>
+
+<link rel="stylesheet" href="codemirror.css">
+<script src="codemirror-compressed.js"></script>
+
+<div id="editor0"></div>
+<button id="button0">Deforest</button>
+
+<script>
+    var NUM_EDITORS = 1;
+
+    // weird GHCJS behavior, it wants a function
+    function getNumEditors() { return NUM_EDITORS; }
+</script>
+
+<script src="../dist/dist-sandbox-5d0410e1/build/deforest/deforest.jsexe/rts.js"></script>
+<script src="../dist/dist-sandbox-5d0410e1/build/deforest/deforest.jsexe/lib.js"></script>
+<script src="../dist/dist-sandbox-5d0410e1/build/deforest/deforest.jsexe/out.js"></script>
+
+<script>
+    var editors = [];
+
+    for (var i = 0; i < NUM_EDITORS; i++) {
+        var e = CodeMirror(document.getElementById("editor" + i));
+        editors.push([e, document.getElementById("button" + i)]);
+    }
+</script>
+
+<script src="../dist/dist-sandbox-5d0410e1/build/deforest/deforest.jsexe/runmain.js"></script>

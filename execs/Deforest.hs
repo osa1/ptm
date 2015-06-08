@@ -2,7 +2,13 @@
 
 module Main where
 
-#ifndef __GHCJS__
+-- Can't nest a `executable` section in Cabal file to a `if ...`, so I'm using
+-- CPP to prevent this module to be built without --ghcjs.
+
+-- We can't use __GHCJS__ macro, because it's also defined when -native-too is
+-- used by GHCJS.
+
+#ifndef ghcjs_HOST_OS
 
 main :: IO ()
 main = return ()
@@ -34,7 +40,7 @@ foreign import javascript unsafe
   "editors[$1][1]"
   getEditorButton :: Int -> IO Element
 
-foreign import javascript unsafe "getNumEditors" numEditors :: IO Int
+foreign import javascript unsafe "$r = NUM_EDITORS" numEditors :: IO Int
 
 deforestForm :: Int -> IO (String, String)
 deforestForm i = do

@@ -241,11 +241,17 @@ append_pgm1 = parseTerm' "append (append (append xs ys) zs) lst"
 append_pgm2 :: Term
 append_pgm2 = parseTerm' "append xs (append ys zs)"
 
+append_pgm3 :: Term
+append_pgm3 = parseTerm' "append xs ys"
+
 flip_pgm :: Term
 flip_pgm = parseTerm' "flip (flip zt)"
 
 reverse_pgm :: Term
 reverse_pgm = parseTerm' "reverse (reverse lst)"
+
+reverse_pgm1 :: Term
+reverse_pgm1 = parseTerm' "reverse lst"
 
 deforest' :: Term -> ([(Var, [Var], TTerm)], TTerm)
 deforest' t =

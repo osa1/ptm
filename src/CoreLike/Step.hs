@@ -1,11 +1,11 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, TupleSections #-}
 
 module CoreLike.Step where
 
-import Control.Arrow (second)
+import Data.Bifunctor (second)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
 import qualified Language.Haskell.Exts as HSE
 import qualified Text.PrettyPrint.Leijen as PP
@@ -14,6 +14,8 @@ import CoreLike.Parser
 import CoreLike.Simplify
 import CoreLike.Syntax
 import CoreLike.ToHSE
+
+import Debug.Trace
 
 data Restriction
   = NEq Var (Either DataCon Literal) -- TODO: Use this in default branches.
@@ -166,39 +168,37 @@ step _   (Case d@(Value (Literal lit)) cases) = findBranch cases
     findBranch ((DefaultAlt Nothing , rhs) : _   ) = Transient rhs
     findBranch ((DefaultAlt (Just v), rhs) : _   ) = Transient (substTerm v d rhs)
 
-step _   (Case Value{} _) = Stuck
+step _   (Case (Value Lambda{}) _) = Stuck
 step env (Case scrt cases) =
     case step env scrt of
       Transient scrt' -> Transient $ Case scrt' cases
       Split scrts     -> Split $ map (second $ flip Case cases) scrts
       Stuck           ->
-        case stepCases cases of
-          Transient cases' -> Transient $ Case scrt cases'
-          Split cases'     -> Split $ map (second $ Case scrt) cases'
-          Stuck            -> Stuck
-  where
-    stepCases :: [(AltCon, Term)] -> Step [(AltCon, Term)]
-    stepCases [] = Stuck
-    -- TODO: Can we make any progress in case bodies here?
-    stepCases ((pattern, rhs) : rest) =
-      case step env rhs of
-        Transient rhs' -> Transient ((pattern, rhs') : rest)
-        Split rhs'     -> Split $ map (\(cs, rhs'') -> (cs, (pattern, rhs'') : rest)) rhs'
-        Stuck          ->
-          case stepCases rest of
-            Transient rest' -> Transient ((pattern, rhs) : rest')
-            Split rest'     -> Split $ map (second ((pattern, rhs) :)) rest'
-            Stuck           -> Stuck
+        case scrt of
+          Var v -> trace ("splitting into " ++ show (length cases) ++ " cases.") $
+            Split $ map ([],) $ flip map cases $ \(con, rhs) ->
+              case con of
+                DataAlt con args     -> LetRec [(v, Value $ Data con args)] rhs
+                LiteralAlt lit       -> LetRec [(v, Value $ Literal lit)] rhs
+                DefaultAlt (Just v') -> LetRec [(v', Var v)] rhs
+                DefaultAlt Nothing   -> rhs
+          _ -> trace ("Unhandled scrt in step: " ++ show scrt) Stuck
 
 step env (LetRec binders body) =
-    case iterBs env' binders of
-      Transient binders' -> Transient (LetRec binders' body)
-      Split binders'     -> Split $ map (second $ flip LetRec body) binders'
-      Stuck              ->
-        case step env' body of
-          Transient body' -> Transient $ LetRec binders body'
-          Split bs        -> Split $ map (second $ LetRec binders) bs
-          Stuck           -> Stuck
+    case step env' body of
+      Transient body' -> Transient (LetRec binders body')
+      Split bs        -> Split $ map (second $ LetRec binders) bs
+      Stuck           ->
+        let ps = mapMaybe (\v -> ([],) <$> lookup v binders) $ S.toList $ fvsTerm body
+         in trace ("splitting into " ++ show (length ps) ++ " pieces.") $ Split ps
+    -- case iterBs env' binders of
+    --   Transient binders' -> Transient (LetRec binders' body)
+    --   Split binders'     -> Split $ map (second $ flip LetRec body) binders'
+    --   Stuck              ->
+    --     case step env' body of
+    --       Transient body' -> Transient $ LetRec binders body'
+    --       Split bs        -> Split $ map (second $ LetRec binders) bs
+    --       Stuck           -> Stuck
   where
     env' = foldl' (\m (k, v) -> M.insert k v m) env binders
 

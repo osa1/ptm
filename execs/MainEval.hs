@@ -32,6 +32,7 @@ main = do
 data REPLCmd
   = Step
   | Drive
+  | EvalSplit Int
   | Eval
   | Load String
   | Term String
@@ -80,6 +81,14 @@ runREPL initSt = do
             outputStrLn "Try \"Load\" and \"Term\" commands."
             return False
           Just st -> liftIO (writeIORef currentState $ Just $ drive st) >> return True
+
+      runCmd (Just (EvalSplit n)) =
+        liftIO (readIORef currentState) >>= \case
+          Nothing -> do
+            outputStrLn "Can't drive, state is not set."
+            outputStrLn "Try \"Load\" and \"Term\" commands."
+            return False
+          Just st -> liftIO (writeIORef currentState $ Just $ evalSplit n st) >> return True
 
       runCmd (Just Eval) =
         liftIO (readIORef currentState) >>= \case

@@ -6,10 +6,7 @@
 --
 module EvalSpec where
 
-import Control.Monad
 import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified Language.Haskell.Exts as HSE
 
 import Test.Hspec
 import Test.Hspec.Contrib.HUnit
@@ -19,7 +16,6 @@ import CoreLike.Parser
 import CoreLike.Simplify
 import CoreLike.Step
 import CoreLike.Syntax
-import CoreLike.ToHSE
 import TestUtils
 
 main :: IO ()

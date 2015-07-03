@@ -1,6 +1,3 @@
-{-# LANGUAGE BangPatterns, GeneralizedNewtypeDeriving, LambdaCase,
-             OverloadedStrings, TupleSections #-}
-
 module Deforestation.Deforest where
 
 import Control.DeepSeq (force)
@@ -25,10 +22,9 @@ data Fn = Fn [Var] Term deriving (Show)
 type Env = M.Map Var Fn
 
 lookupFn :: Env -> Var -> Fn
-lookupFn e v = case M.lookup v e of
-                 Nothing ->
-                   error $ "Can't find function " ++ v ++ " in env: " ++ show (M.keysSet e)
-                 Just f -> f
+lookupFn e v =
+  fromMaybe (error $ "Can't find function " ++ v ++ " in env: " ++ show (M.keysSet e))
+            (M.lookup v e)
 
 data Hist
   = FunCall Var [Term]
@@ -185,8 +181,8 @@ checkAppRenaming (fName, args) h0 = iter [ (v, ts, h) | (FunCall v ts, h) <- h0 
         Nothing     -> iter rest
 
 checkCaseRenaming :: (Term, [(Pat, Term)]) -> History -> Maybe TTerm
-checkCaseRenaming c@(scrt, cases) h0 =
-    let h = [ (t, cs, h) | (Match t cs, h) <- h0 ] in
+checkCaseRenaming _c@(scrt, cases) h0 =
+    let h = [ (t, cs, h_) | (Match t cs, h_) <- h0 ] in
     -- Debug.Trace.trace ("checkCaseRenaming: " ++ show c ++ "\nhistory: " ++ show h) $
       iter h
   where

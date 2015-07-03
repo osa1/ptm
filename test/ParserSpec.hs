@@ -1,5 +1,3 @@
-{-# LANGUAGE MultiWayIf, TupleSections #-}
-
 module ParserSpec where
 
 import Control.Monad
@@ -9,7 +7,9 @@ import System.FilePath
 
 import Test.Hspec
 import Test.Hspec.Contrib.HUnit
-import Test.HUnit
+import Test.HUnit hiding (path)
+-- I hate it when libraries export unqualified record field selectors with super
+-- generic names, like path, ret, result, etc.
 
 import CoreLike.Parser
 import CoreLike.ToHSE

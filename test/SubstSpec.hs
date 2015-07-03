@@ -1,9 +1,6 @@
-{-# LANGUAGE MultiWayIf, TupleSections #-}
-
 module SubstSpec where
 
 import Control.Monad
-import qualified Data.Set as S
 import qualified Language.Haskell.Exts as HSE
 
 import Test.Hspec
@@ -49,10 +46,10 @@ substEq
   -> String -- ^ what to substitute to
   -> String -- ^ expected term
   -> Test
-substEq name t v t' exp = TestLabel name $ TestCase $ do
+substEq name t v t' expr = TestLabel name $ TestCase $ do
     tm       <- term t
     newTm    <- term t'
-    expected <- term exp
+    expected <- term expr
     let s = substTerm v newTm tm
     unless (s == expected) $
       assertFailure $ unlines

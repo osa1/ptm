@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module CoreLike.Parser where
 
@@ -201,20 +201,20 @@ list :: [Term] -> Parser Term
 list [] = return $ Value $ Data "[]" []
 list ts = do
     -- generate names for terms, if term is already a value, return itself in vars
-    (lets, vars) <- termLets ts
+    (lets, vs) <- termLets ts
     -- generate cons pairs as lets
-    ((_, t) : conses) <- consLets vars
+    ((_, t) : conses) <- consLets vs
     return $ LetRec (lets ++ conses) t
   where
     termLets :: [Term] -> Parser ([(Var, Term)], [Var])
     termLets [] = return ([], [])
     termLets (t : rest) = do
-      (lets, vars) <- termLets rest
+      (lets, vs) <- termLets rest
       case t of
-        Var v -> return (lets, v : vars)
+        Var v -> return (lets, v : vs)
         _     -> do
           v <- freshVar
-          return $ ((v, t) : lets, v : vars)
+          return $ ((v, t) : lets, v : vs)
 
     consLets :: [Var] -> Parser [(Var, Term)]
     consLets [] = return []

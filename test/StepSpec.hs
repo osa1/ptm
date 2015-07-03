@@ -7,7 +7,6 @@ import Test.Hspec.Contrib.HUnit
 import Test.HUnit
 
 import CoreLike.Parser
-import CoreLike.Simplify
 import CoreLike.Step
 import CoreLike.Syntax
 import TestUtils
@@ -25,5 +24,6 @@ spec = do
         ]
 
 stepEq :: Env -> String -> String -> Assertion
-stepEq env before after =
-    assertEqual "Step returned wrong" (parseTerm' after) (stepTransient env $ parseTerm' before)
+stepEq env beforeStep afterStep =
+    assertEqual "Step returned wrong" (parseTerm' afterStep)
+                                      (stepTransient env $ parseTerm' beforeStep)

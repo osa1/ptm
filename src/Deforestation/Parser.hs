@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Deforestation.Parser where
 
 import qualified Language.Haskell.Exts as HSE

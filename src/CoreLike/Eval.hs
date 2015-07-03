@@ -1,8 +1,7 @@
-{-# LANGUAGE DeriveAnyClass, DeriveGeneric, LambdaCase, TupleSections #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module CoreLike.Eval where
 
-import Data.Bifunctor (second)
 import Data.Binary (Binary)
 import Data.List (foldl')
 import Data.List ((\\))
@@ -306,7 +305,7 @@ splitEval n (Var v, env, Update v' : fs) = splitEval n (Var v, M.insert v' (Var 
 splitEval _ s = s -- TODO: Implement this
 
 filterEnvUnchanged :: Env -> State -> State
-filterEnvUnchanged e0 (t, e, s) = (t, M.filterWithKey f e, s)
+filterEnvUnchanged e0 (t0, e, s) = (t0, M.filterWithKey f e, s)
   where
     f :: Var -> Term -> Bool
     f v t = case M.lookup v e0 of

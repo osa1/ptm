@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveFunctor, TupleSections #-}
-
 module CoreLike.Step where
 
 import Data.Bifunctor (second)
@@ -178,7 +176,7 @@ step env (Case scrt cases) =
           Var v -> trace ("splitting into " ++ show (length cases) ++ " cases.") $
             Split $ map ([],) $ flip map cases $ \(con, rhs) ->
               case con of
-                DataAlt con args     -> LetRec [(v, Value $ Data con args)] rhs
+                DataAlt con' args    -> LetRec [(v, Value $ Data con' args)] rhs
                 LiteralAlt lit       -> LetRec [(v, Value $ Literal lit)] rhs
                 DefaultAlt (Just v') -> LetRec [(v', Var v)] rhs
                 DefaultAlt Nothing   -> rhs
@@ -202,17 +200,17 @@ step env (LetRec binders body) =
   where
     env' = foldl' (\m (k, v) -> M.insert k v m) env binders
 
-    iterBs :: Env -> [(Var, Term)] -> Step [(Var, Term)]
-    iterBs _ [] = Stuck
-    iterBs _ ((v, t) : bs) =
-      case step env' t of
-        Transient t' -> Transient ((v, t') : bs)
-        Split ts     -> Split $ map (\(restrs, t') -> (restrs, (v, t') : bs)) ts
-        Stuck        ->
-          case iterBs env bs of
-            Transient bs' -> Transient ((v, t) : bs')
-            Split bss     -> Split $ map (\(restrs, bs') -> (restrs, (v, t) : bs')) bss
-            Stuck         -> Stuck
+    -- iterBs :: Env -> [(Var, Term)] -> Step [(Var, Term)]
+    -- iterBs _ [] = Stuck
+    -- iterBs _ ((v, t) : bs) =
+    --   case step env' t of
+    --     Transient t' -> Transient ((v, t') : bs)
+    --     Split ts     -> Split $ map (\(restrs, t') -> (restrs, (v, t') : bs)) ts
+    --     Stuck        ->
+    --       case iterBs env bs of
+    --         Transient bs' -> Transient ((v, t) : bs')
+    --         Split bss     -> Split $ map (\(restrs, bs') -> (restrs, (v, t) : bs')) bss
+    --         Stuck         -> Stuck
 
 -- | Jump through transient steps.
 stepTransient :: Env -> Term -> Term
@@ -245,6 +243,7 @@ parseEnv ((v, t) : rest) =
     let t' = either (error . (++) "Can't parse term in env: ") id $ parseTerm t
      in M.insert v t' $ parseEnv rest
 
+env1 :: Env
 env1 = parseEnv
   [ ("even", "\\x -> case x of { 0 -> True; _ -> odd  (x - 1) }")
   , ("odd",  "\\x -> case x of { 1 -> True; _ -> even (x - 1) }")

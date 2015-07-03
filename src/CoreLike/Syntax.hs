@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveAnyClass, DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module CoreLike.Syntax where
 
@@ -202,14 +202,14 @@ freshVarsFor :: S.Set Var -> [Var]
 freshVarsFor used =
     filter (not . (`S.member` used)) supply
   where
-    supply = map (('f' :) . show) [0..]
+    supply = map (('f' :) . show) [0 :: Int ..]
 
 -- | Similar with 'freshVarsFor', but returns names with given prefix.
 freshVarsForPfx :: String -> S.Set Var -> [Var]
 freshVarsForPfx s used =
     filter (not . (`S.member` used)) supply
   where
-    supply = map ((s ++) . show) [0..]
+    supply = map ((s ++) . show) [0 :: Int ..]
 
 freshForPfx :: String -> S.Set Var -> Var
 freshForPfx s used = (s ++) $ head $ freshVarsFor used

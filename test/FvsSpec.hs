@@ -1,5 +1,3 @@
-{-# LANGUAGE MultiWayIf, TupleSections #-}
-
 module FvsSpec where
 
 import qualified Data.Set as S

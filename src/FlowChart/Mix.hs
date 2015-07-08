@@ -132,10 +132,9 @@ loop (BasicBlock lbl0 asgns0 jmp0, input0) pgm div = do
     processBlock lbl = do
       let (asgns, input) = genAsgns asgns0 input0
       case jmp0 of
-        Just (Goto jmpLbl) -> do
+        Just (Goto jmpLbl) ->
           -- generate(or find) specialized block, and compress the transition
-          BasicBlock _ asgns' jmp' <- loop (lookupBlock jmpLbl pgm, input) pgm div
-          return $ BasicBlock lbl (asgns ++ asgns') jmp'
+          compressJmp lbl asgns input jmpLbl
 
         Just (If cond l1 l2) ->
           if isExpStatic div cond

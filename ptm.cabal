@@ -132,16 +132,18 @@ test-suite tests
   ghc-options:         -Wall -threaded
 
   build-depends:
+    ptm,
+
     base >=4.7 && <5,
     containers,
     deepseq,
     directory,
     filepath,
+    groom,
     haskell-src-exts,
     hspec,
     hspec-contrib,
-    HUnit,
-    ptm
+    HUnit
 
   default-extensions:
     MultiWayIf

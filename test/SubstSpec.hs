@@ -2,6 +2,7 @@ module SubstSpec where
 
 import Control.Monad
 import qualified Language.Haskell.Exts as HSE
+import Text.Groom (groom)
 
 import Test.Hspec
 import Test.Hspec.Contrib.HUnit
@@ -21,19 +22,22 @@ spec = do
       fromHUnitTest $ TestList
         [ substEq "lambda1" "\\x -> x" "x" "1 + 2" "\\x -> x"
         , substEq "let1" "let x = y in x + y" "x" "y" "let x = y in x + y"
-        , substEq "let2" "let x = y in x + y" "y" "x" "let x = x in x + x"
+        , substEq "let2" "let x = y in x + y" "y" "x" "let f0 = x in f0 + x"
           -- FIXME: Several issues here:
           --   - Need to do alpha renaming.
           --   - Need a "equality modulo alpha-renaming" test. (because we
           --     introduce new let bindings)
           --   - We may need to float lets to outer levels as much as possible.
-        , substEq "case1" "case x of { Blah a b -> a + b; y -> x + y }"
+        , -- FIXME: This one has a problem with parsing primops, namely, we
+          -- parse it as if primop application requires A-normal form, which is
+          -- not the case right now. We should probably decide whether we need
+          -- A-normal form or not for primops.
+          substEq "case1" "case x of { Blah a b -> a + b; y -> x + y }"
                           "x" "Data x y"
-                          "case Data x y of { Blah a b -> a + b; y -> (let x = Data x y in (+) x) y }"
-          -- FIXME: We again need renaming here.
+                          "case Data x y of { Blah a b -> a + b; y -> (Data x y) + y }"
         , substEq "case simple 1" "case x of { y -> x + y }"
                                   "x" "y"
-                                  "case y of { v0 -> y + v0 }"
+                                  "case y of { f0 -> y + f0 }"
         , substEq "case simple 2" "case x of { y -> 1 + y }"
                                   "y" "10"
                                   "case x of { y -> 1 + y }"
@@ -56,9 +60,14 @@ substEq name t v t' expr = TestLabel name $ TestCase $ do
         [ "Substituted term is different than expected term."
         , "  Expected:"
         , HSE.prettyPrint (termToHSE expected)
+        , parens (groom expected)
         , "  Found:"
         , HSE.prettyPrint (termToHSE s)
+        , parens (groom s)
         ]
+  where
+    parens :: String -> String
+    parens s = '(' : s ++ ")"
 
 term :: String -> Assertion' Term
 term = either (assertFailure' . (++) "Can't parse str as term: ") return . parseTerm

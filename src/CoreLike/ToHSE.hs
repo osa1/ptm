@@ -8,57 +8,46 @@ import Prelude hiding (LT)
 
 import CoreLike.Syntax
 
-hseModule :: [(Var, Term)] -> HSE.Module
+hseModule :: [(Var, Term ann)] -> HSE.Module
 hseModule decls =
     HSE.Module dummyLoc (HSE.ModuleName "Main") [] Nothing Nothing [] $ map bindToHSE decls
 
-termToHSE :: Term -> HSE.Exp
+termToHSE :: Term ann -> HSE.Exp
 
 -- FIXME: Handle special symbols here
-termToHSE (Var "+") = HSE.Var (HSE.UnQual (HSE.Symbol "+"))
-termToHSE (Var v) =
+termToHSE (Var _ v) =
     -- FIXME: This variable may contain dots, maybe take that into account
     HSE.Var (HSE.UnQual (HSE.Ident v))
-termToHSE (Value v) = valueToHSE v
-termToHSE (App term var) =
-    -- TODO: Inline variable if it's used once.
-    HSE.App (termToHSE term) (HSE.Var (HSE.UnQual (HSE.Ident var)))
-termToHSE (Case scr cases) =
+termToHSE (PrimOp _ (PrimOp' op _)) = HSE.Var (HSE.UnQual (HSE.Symbol (primOpStr op)))
+termToHSE (Value _ v) = valueToHSE v
+termToHSE (App _ t1 t2) = HSE.App (termToHSE t1) (termToHSE t2)
+termToHSE (Case _ scr cases) =
     HSE.Case (termToHSE scr) (map altToHSE cases)
-termToHSE (LetRec binds rhs) =
+termToHSE (LetRec _ binds rhs) =
     HSE.Let (HSE.BDecls $ map bindToHSE binds) (termToHSE rhs)
-termToHSE (PrimOp op args) = primOpToHSE op args
 
-
-valueToHSE :: Value -> HSE.Exp
-valueToHSE (Lambda var rhs) =
+valueToHSE :: Value ann -> HSE.Exp
+valueToHSE (Lambda _ var rhs) =
     -- FIXME: use some dummy value for locs
     case termToHSE rhs of
       HSE.Lambda _ pats body -> HSE.Lambda dummyLoc (HSE.PVar (HSE.Ident var) : pats) body
       body -> HSE.Lambda dummyLoc [HSE.PVar (HSE.Ident var)] body
-valueToHSE (Data con args) =
+valueToHSE (Data _ con args) =
     -- FIXME: Handle special symbols
-    foldl' (\f arg -> HSE.App f (HSE.Var (HSE.UnQual (HSE.Ident arg))))
+    foldl' (\f arg -> HSE.App f   (termToHSE arg))
            (HSE.Con (HSE.UnQual (HSE.Ident con))) args
-valueToHSE (Literal (Int i)) = HSE.Lit (HSE.Int i)
-valueToHSE (Literal (Char c)) = HSE.Lit (HSE.Char c)
+valueToHSE (Literal _ (Int i)) = HSE.Lit (HSE.Int i)
+valueToHSE (Literal _ (Char c)) = HSE.Lit (HSE.Char c)
 -- valueToHSE ind@Indirect{} = error $ "Can't translate Indirects to HSE: " ++ show ind
 
-primOpToHSE :: PrimOp -> [Term] -> HSE.Exp
-primOpToHSE op [t1, t2] = HSE.InfixApp (termToHSE t1) (primOpToQOp op) (termToHSE t2)
-primOpToHSE op args = error $ "Can't convert PrimOp to HSE: " ++ show op ++ ", " ++ show args
+-- primOpToHSE :: PrimOp -> [Term] -> HSE.Exp
+-- primOpToHSE op [t1, t2] = HSE.InfixApp (termToHSE t1) (primOpToQOp op) (termToHSE t2)
+-- primOpToHSE op args = error $ "Can't convert PrimOp to HSE: " ++ show op ++ ", " ++ show args
 
-primOpToQOp :: PrimOp -> HSE.QOp
-primOpToQOp Add = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "+"
-primOpToQOp Sub = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "-"
-primOpToQOp Mul = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "*"
-primOpToQOp Div = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "/"
-primOpToQOp Mod = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "%"
-primOpToQOp Eq  = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "=="
-primOpToQOp LT  = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<"
-primOpToQOp LTE = HSE.QVarOp $ HSE.UnQual $ HSE.Symbol "<="
+-- primOpToQOp :: PrimOp -> HSE.QOp
+-- primOpToQOp = HSE.QVarOp . HSE.UnQual . HSE.Symbol . primOpStr
 
-altToHSE :: (AltCon, Term) -> HSE.Alt
+altToHSE :: (AltCon, Term ann) -> HSE.Alt
 altToHSE (con, t) =
     HSE.Alt dummyLoc (altConToHSE con) (HSE.UnGuardedRhs $ termToHSE t) (HSE.BDecls [])
 
@@ -74,7 +63,7 @@ altConToHSE (LiteralAlt lit) = HSE.PLit HSE.Signless $ litToHSE lit
 altConToHSE (DefaultAlt Nothing) = HSE.PWildCard
 altConToHSE (DefaultAlt (Just v)) = HSE.PVar (HSE.Ident v)
 
-bindToHSE :: (Var, Term) -> HSE.Decl
+bindToHSE :: (Var, Term ann) -> HSE.Decl
 bindToHSE (v, t) =
     case termToHSE t of
       HSE.Lambda _ pats body ->

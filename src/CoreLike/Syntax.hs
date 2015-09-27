@@ -96,6 +96,9 @@ type Tag = Int
 type TaggedTerm = Term Tag
 type TaggedValue = Value Tag
 
+type Term' = Term ()
+type Value' = Value ()
+
 --------------------------------------------------------------------------------
 -- * Collecting free variables
 

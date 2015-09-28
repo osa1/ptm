@@ -21,6 +21,7 @@ library
     -- CoreLike.Step
     CoreLike.Syntax
     CoreLike.ToHSE
+    CoreLike.Utils
 
     Deforestation.Deforest
     Deforestation.Parser
@@ -141,7 +142,6 @@ test-suite tests
     deepseq,
     directory,
     filepath,
-    groom,
     haskell-src-exts,
     hspec,
     hspec-contrib,

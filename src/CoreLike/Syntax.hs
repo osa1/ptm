@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass, DeriveFoldable, DeriveTraversable #-}
 
 module CoreLike.Syntax where
 
@@ -47,16 +47,19 @@ data Term ann
 
   | Case ann (Term ann) [(AltCon, Term ann)]
   | LetRec ann [(Var, Term ann)] (Term ann)
-  deriving (Show, Eq, Ord, Generic, Binary)
+  deriving (Show, Eq, Ord, Generic, Binary, Functor, Foldable, Traversable)
 
 data Value ann
   = Lambda ann Var (Term ann)
   | Data ann DataCon [Term ann]
     -- Similar to the `App` case above, using non-ANF terms here.
   | Literal ann Literal
-  deriving (Show, Eq, Ord, Generic, Binary)
+  deriving (Show, Eq, Ord, Generic, Binary, Functor, Foldable, Traversable)
 
 type Env ann = M.Map Var (Term ann)
+
+type Term' = Term ()
+type Value' = Value ()
 
 -- | Used to generate HSE symbols.
 primOpStr :: PrimOpOp -> String
@@ -87,17 +90,6 @@ getAnn (Value a _) = a
 getAnn (App a _ _) = a
 getAnn (Case a _ _) = a
 getAnn (LetRec a _ _) = a
-
---------------------------------------------------------------------------------
--- * Definition of tags and type synonyms for tagged terms
-
-type Tag = Int
-
-type TaggedTerm = Term Tag
-type TaggedValue = Value Tag
-
-type Term' = Term ()
-type Value' = Value ()
 
 --------------------------------------------------------------------------------
 -- * Collecting free variables

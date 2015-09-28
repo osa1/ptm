@@ -8,7 +8,6 @@ module CoreLike.Parser
 
 import Control.Monad.Except
 import Control.Monad.State.Strict
-import Data.Bifunctor (first)
 import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 import Prelude hiding (LT)
@@ -39,14 +38,6 @@ parseModule contents =
       HSE.ParseFailed loc str ->
         Left $ "Parse failed at [" ++ HSE.srcFilename loc
                  ++ "] (" ++ show (HSE.srcLine loc) ++ ":" ++ show (HSE.srcColumn loc) ++ "): " ++ str
-
--- TODO: Implement PrimOp parsing.
-prims :: M.Map HSE.QName PrimOpOp
-prims = M.fromList $ map (first $ HSE.UnQual . HSE.Symbol) symbols
-  where
-    symbols =
-      [ ("+", Add), ("-", Sub), ("*", Mul), ("/", Div), ("%", Mod),
-        ("==", Eq), ("<", LT), ("<=", LTE) ]
 
 parseTerm :: String -> Either String Term'
 parseTerm str =
@@ -83,18 +74,33 @@ transformExp (HSE.Con qname) =
     -- FIXME: We should be using a function if this is a partial application...
     (Value () . flip (Data ()) []) <$> transformQName qname
 transformExp (HSE.Lit lit) = Value () <$> transformLit lit
-transformExp (HSE.App e1 e2) = App () <$> transformExp e1 <*> transformExp e2
+
+transformExp (HSE.App e1 e2) = do
+    e1' <- checkPrimOp <$> transformExp e1
+    e2' <- transformExp e2
+    return $ App () e1' e2'
+  where
+    checkPrimOp :: Term' -> Term'
+    checkPrimOp (Var _ v)
+      | Just op <- opNameOp v
+      = PrimOp () op
+    checkPrimOp t = t
+
 transformExp (HSE.InfixApp e1 op e2) = do
     e1' <- transformExp e1
     e2' <- transformExp e2
     op' <- opName op
-    case op of
-      HSE.QConOp{} ->
-        -- FIXME: Make sure the application is not partial, in that case we
-        -- should be using function variant instead
-        return $ Value () $ Data () op' [e1', e2']
-      HSE.QVarOp{} ->
-        return $ App () (App () (Var () op') e1') e2'
+    case opNameOp op' of
+      Just pOp -> return $ App () (App () (PrimOp () pOp) e1') e2'
+      Nothing ->
+        case op of
+          HSE.QConOp{} ->
+            -- FIXME: Make sure the application is not partial, in that case we
+            -- should be using function variant instead
+            return $ Value () $ Data () op' [e1', e2']
+          HSE.QVarOp{} ->
+            return $ App () (App () (Var () op') e1') e2'
+
 transformExp (HSE.Lambda _ pats body) = lambda <$> collectArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
     e1' <- transformExp e1
@@ -109,6 +115,19 @@ transformExp (HSE.Let (HSE.BDecls decls) body) =
 transformExp (HSE.Tuple _ args) =
     Value () . mkTuple <$> mapM transformExp args
 transformExp e = throwError $ "Unsupported exp: " ++ show e
+
+opNameOp :: Var -> Maybe PrimOp'
+opNameOp v = M.lookup v prims
+
+-- TODO: Implement PrimOp parsing.
+prims :: M.Map Var PrimOp'
+prims = M.fromList symbols -- $ map (first $ HSE.UnQual . HSE.Symbol) symbols
+  where
+    symbols =
+      [ ("+", PrimOp' Add 2), ("-", PrimOp' Sub 2),
+        ("*", PrimOp' Mul 2), ("/", PrimOp' Div 2),
+        ("%", PrimOp' Mod 2), ("==", PrimOp' Eq 2),
+        ("<", PrimOp' LT 2), ("<=", PrimOp' LTE 2) ]
 
 mkTuple :: [Term'] -> Value'
 mkTuple ts = Data () ('(' : replicate (length ts - 1) ',' ++ ")") ts

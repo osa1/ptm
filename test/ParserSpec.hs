@@ -13,6 +13,9 @@ import Test.HUnit hiding (path)
 
 import CoreLike.Parser
 import CoreLike.ToHSE
+import CoreLike.Utils
+
+import TestUtils
 
 main :: IO ()
 main = hspec spec
@@ -30,9 +33,10 @@ spec = do
               Left err -> assertFailure $ unlines
                 [ "Can't parse printed module:", printed, "error:", err ]
               Right bs' ->
-                assertEqual
+                assertEqStrs
                   ("Printed module is parsed differently\nprinted:\n" ++ printed)
                   bs bs'
+                  (showPretty bs) (showPretty bs')
 
 loadTestFiles :: FilePath -> IO [(FilePath, String)]
 loadTestFiles root = getDirectoryContents root >>= fmap concat . mapM f

@@ -18,11 +18,29 @@ import CoreLike.Syntax
 -- as much as possible, but currently `step` gets stuck if we don't use `simpl`.
 -- One example is `let _ = _ in 1`, `step` doesn't reduce this to `1`.
 --
-simpl :: Term -> Term
-simpl t@Var{}            = t
-simpl t@Value{}          = t
-simpl (App f args)       = App (simpl f) args
-simpl (PrimOp op args)   = PrimOp op (map simpl args)
+-- FIXME: I disabled most of the stuff, until I decide which ones are really
+-- necessary here.
+--
+simpl :: Term ann -> Term ann
+simpl t@Var{} = t
+simpl t@PrimOp{} = t
+simpl (Value ann val) = Value ann $ simplValue val
+simpl (App ann t1 t2) = App ann (simpl t1) (simpl t2)
+simpl (Case ann scrt alts) = Case ann (simpl scrt) (map (second simpl) alts)
+simpl (LetRec ann bndrs body) =
+    LetRec ann (filter ((`S.member` all_fvs) . fst) bndrs') (simpl body)
+  where
+    bndrs' = map (second simpl) bndrs
+    body_fvs = fvsTerm body
+    bndrs_fvs = map (fvsTerm . snd) bndrs'
+    all_fvs = S.unions (body_fvs : bndrs_fvs)
+
+simplValue :: Value ann -> Value ann
+simplValue (Lambda ann b t)  = Lambda ann b $ simpl t
+simplValue (Data ann con ts) = Data ann con $ map simpl ts
+simplValue v@Literal{}       = v
+
+{-
 -- Case-case transformation. We add this as a simplification pass since that's
 -- not really an operational semantics step.
 --
@@ -143,3 +161,4 @@ simplBinds bs rhs =
 
     removeBs :: [Var] -> [(Var, Term)] -> [(Var, Term)]
     removeBs vs = filter (\(v, _) -> not (v `elem` vs))
+-}

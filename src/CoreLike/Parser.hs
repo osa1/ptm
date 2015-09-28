@@ -97,7 +97,7 @@ transformExp (HSE.InfixApp e1 op e2) = do
           HSE.QConOp{} ->
             -- FIXME: Make sure the application is not partial, in that case we
             -- should be using function variant instead
-            return $ Value () $ Data () op' [e1', e2']
+            return $ App () (App () (Value () $ Data () op' []) e1') e2'
           HSE.QVarOp{} ->
             return $ App () (App () (Var () op') e1') e2'
 
@@ -183,7 +183,8 @@ lambda []       t = t
 lambda (v : vs) t = Value () $ Lambda () v (lambda vs t)
 
 list :: [Term'] -> Term'
-list ts = foldr (\t l ->  Value () (Data () "(:)" [t, l])) (Value () (Data () "[]" [])) ts
+list ts = foldr (\h t -> App () (App () (Value () (Data () "(:)" [])) h) t)
+                (Value () (Data () "[]" [])) ts
 
 nameVar :: HSE.Name -> Var
 nameVar (HSE.Ident s)  = s

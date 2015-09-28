@@ -22,11 +22,11 @@ spec = do
     files <- runIO $ loadTestFiles "tests"
     describe "parsing and printing" $ forM_ files $ \(path, contents) ->
       fromHUnitTest $ TestLabel ("parsing and printing " ++ path) $ TestCase $
-        case parse contents of
+        case parseModule contents of
           Left err -> assertFailure $ "Parsing failed: " ++ err
           Right bs ->
             let printed = HSE.prettyPrint $ hseModule bs in
-            case parse printed of
+            case parseModule printed of
               Left err -> assertFailure $ unlines
                 [ "Can't parse printed module:", printed, "error:", err ]
               Right bs' ->
@@ -35,9 +35,13 @@ spec = do
                   bs bs'
 
 loadTestFiles :: FilePath -> IO [(FilePath, String)]
-loadTestFiles root = getDirectoryContents root >>= fmap concat . mapM (\f -> do
-  let p = root </> f
-  isDir <- doesDirectoryExist p
-  if | head f == '.' -> return []
-     | isDir -> loadTestFiles p
-     | otherwise -> ((:[]) . (p,)) `fmap` readFile p)
+loadTestFiles root = getDirectoryContents root >>= fmap concat . mapM f
+  where
+    f path
+      | ('.' : _) <- path
+      = return []
+      | otherwise
+      = do let p = root </> path
+           isDir <- doesDirectoryExist p
+           if isDir then loadTestFiles p
+                    else ((:[]) . (p,)) `fmap` readFile p

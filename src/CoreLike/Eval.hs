@@ -84,7 +84,7 @@ insertVar v t env stack body = (env', body')
 
 evalStep :: State ann -> Maybe (State ann)
 evalStep (Var ann v, env, stack) = (, M.delete v env, Update ann v : stack) <$> M.lookup v env
-evalStep (Value ann v, env, stack) = unwind v env stack
+evalStep (Value _ v, env, stack) = unwind v env stack
 evalStep (App ann t1 t2, env, stack) = Just (t1, env, Apply ann t2 : stack)
 evalStep (PrimOp ann op (arg1 : args), env, stack) =
     Just (arg1, env, PrimApply ann op [] args : stack)

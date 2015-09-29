@@ -19,7 +19,7 @@ termToHSE (Var _ v) =
     -- FIXME: This variable may contain dots, maybe take that into account
     HSE.Var (HSE.UnQual (HSE.Ident v))
 
-termToHSE (PrimOp _ op ts) =
+termToHSE (PrimOp _ (PrimOp' op _) ts) =
     app (HSE.Var (HSE.UnQual (HSE.Symbol (primOpStr op)))) (map termToHSE ts)
 
 termToHSE (Value _ v) = valueToHSE v
@@ -41,14 +41,6 @@ valueToHSE (Data _ con args) =
            (HSE.Con (HSE.UnQual (HSE.Ident con))) args
 valueToHSE (Literal _ (Int i)) = HSE.Lit (HSE.Int i)
 valueToHSE (Literal _ (Char c)) = HSE.Lit (HSE.Char c)
--- valueToHSE ind@Indirect{} = error $ "Can't translate Indirects to HSE: " ++ show ind
-
--- primOpToHSE :: PrimOp -> [Term] -> HSE.Exp
--- primOpToHSE op [t1, t2] = HSE.InfixApp (termToHSE t1) (primOpToQOp op) (termToHSE t2)
--- primOpToHSE op args = error $ "Can't convert PrimOp to HSE: " ++ show op ++ ", " ++ show args
-
--- primOpToQOp :: PrimOp -> HSE.QOp
--- primOpToQOp = HSE.QVarOp . HSE.UnQual . HSE.Symbol . primOpStr
 
 altToHSE :: (AltCon, Term ann) -> HSE.Alt
 altToHSE (con, t) =
@@ -81,7 +73,7 @@ litToHSE (Int i) = HSE.Int i
 litToHSE (Char c) = HSE.Char c
 
 app :: HSE.Exp -> [HSE.Exp] -> HSE.Exp
-app = foldl' (flip HSE.App)
+app = foldl' HSE.App
 
 dummyLoc :: HSE.SrcLoc
 dummyLoc = HSE.SrcLoc "" 0 0

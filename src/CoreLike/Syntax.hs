@@ -16,7 +16,12 @@ type Var = String
 
 type DataCon = String
 
-data PrimOp' = Add | Sub | Mul | Div | Mod | Eq | LT | LTE
+data PrimOpOp = Add | Sub | Mul | Div | Mod | Eq | LT | LTE
+  deriving (Show, Eq, Ord, Generic, Binary)
+
+type Arity = Int
+
+data PrimOp' = PrimOp' PrimOpOp Arity
   deriving (Show, Eq, Ord, Generic, Binary)
 
 data AltCon
@@ -33,8 +38,7 @@ data Literal
 data Term ann
   = Var ann Var
 
-  | -- INVARIANT: Always fully saturated.
-    -- We don't generate this in the parser, only evaluator generates this.
+  | -- INVARIANT: Always fully saturated. Parser should check for this.
     PrimOp ann PrimOp' [Term ann]
 
   | Value ann (Value ann)
@@ -61,15 +65,15 @@ type Term' = Term ()
 type Value' = Value ()
 
 -- | Used to generate HSE symbols.
-primOpStr :: PrimOp' -> String
-primOpStr Add = "(+)"
-primOpStr Sub = "(-)"
-primOpStr Mul = "(*)"
-primOpStr Div = "(/)"
-primOpStr Mod = "(%)"
-primOpStr Eq  = "(==)"
-primOpStr LT  = "(<)"
-primOpStr LTE = "(<=)"
+primOpStr :: PrimOpOp -> String
+primOpStr Add = "+"
+primOpStr Sub = "-"
+primOpStr Mul = "*"
+primOpStr Div = "/"
+primOpStr Mod = "%"
+primOpStr Eq  = "=="
+primOpStr LT  = "<"
+primOpStr LTE = "<="
 
 --------------------------------------------------------------------------------
 -- * Working with annotations
@@ -82,6 +86,8 @@ setAnn a (App _ t1 t2) = App a t1 t2
 setAnn a (Case _ t cs) = Case a t cs
 setAnn a (LetRec _ bs t) = LetRec a bs t
 
+-- I think we could just use (head . toList) here...
+
 getAnn :: Term ann -> ann
 getAnn (Var a _) = a
 getAnn (PrimOp a _ _) = a
@@ -89,6 +95,14 @@ getAnn (Value a _) = a
 getAnn (App a _ _) = a
 getAnn (Case a _ _) = a
 getAnn (LetRec a _ _) = a
+
+getAnnVal :: Value ann -> ann
+getAnnVal (Lambda ann _ _) = ann
+getAnnVal (Data ann _ _) = ann
+getAnnVal (Literal ann _) = ann
+
+removeAnns :: Functor f => f a -> f ()
+removeAnns = fmap (const ())
 
 --------------------------------------------------------------------------------
 -- * Collecting free variables

@@ -36,7 +36,8 @@ spec = do
                   "error:", err ]
               Right bs' ->
                 assertEqStrs
-                  ("Printed module is parsed differently\nprinted:\n" ++ printed)
+                  (unlines [ "Printed module is parsed differently",
+                             "printed:", printed ])
                   bs bs'
                   (showPretty bs) (showPretty bs')
 

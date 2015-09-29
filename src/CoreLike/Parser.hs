@@ -8,6 +8,8 @@ module CoreLike.Parser
 
 import Control.Monad.Except
 import Control.Monad.State.Strict
+import Data.List (foldl')
+import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 import Prelude hiding (LT)
 
@@ -55,7 +57,7 @@ transformHSE (HSE.Module _ _ _ _ _ _ decls) = mapM transformDecl decls
 
 transformDecl :: HSE.Decl -> Parser (Var, Term')
 transformDecl (HSE.FunBind [HSE.Match _loc fName pats _ rhs _]) = do
-    args <- collectArgs pats
+    args <- collectPatArgs pats
     rhs' <- transformRhs rhs
     return (nameVar fName, lambda args rhs')
 transformDecl (HSE.PatBind _loc (HSE.PVar name) rhs _) = (nameVar name,) <$> transformRhs rhs
@@ -75,23 +77,38 @@ transformExp (HSE.Con qname) =
 transformExp (HSE.Lit lit) = Value () <$> transformLit lit
 
 transformExp (HSE.App e1 e2) = do
-    e1' <- transformExp e1
-    e2' <- transformExp e2
-    return $ App () e1' e2'
+    let (f, args) = collectArgs e1 e2
+    f' <- transformExp f
+    args' <- mapM transformExp args
+    transformApp f' args'
+  where
+    transformApp f args
+      | Var _ v <- f
+      , Just op@(PrimOp' _ arity) <- checkPrimOp v
+      = if arity == length args
+          then return (PrimOp () op args)
+          else throwError (primOpArityErr op (length args))
+      | otherwise
+      = return (app f args)
 
 transformExp (HSE.InfixApp e1 op e2) = do
     e1' <- transformExp e1
     e2' <- transformExp e2
-    op' <- opName op
+    opNm <- opName op
     case op of
       HSE.QConOp{} ->
         -- FIXME: Make sure the application is not partial, in that case we
         -- should be using function variant instead
-        return $ App () (App () (Value () $ Data () op' []) e1') e2'
-      HSE.QVarOp{} ->
-        return $ App () (App () (Var () op') e1') e2'
+        return (app (Value () (Data () opNm [])) [e1', e2'])
+      HSE.QVarOp{}
+        |  Just pOp@(PrimOp' _ arity) <- checkPrimOp opNm
+        -> if arity == 2
+             then return (PrimOp () pOp [e1', e2'])
+             else throwError (primOpArityErr pOp 2)
+        |  otherwise
+        -> return (app e1' [e1', e2'])
 
-transformExp (HSE.Lambda _ pats body) = lambda <$> collectArgs pats <*> transformExp body
+transformExp (HSE.Lambda _ pats body) = lambda <$> collectPatArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
     e1' <- transformExp e1
     e2' <- transformExp e2
@@ -103,24 +120,8 @@ transformExp (HSE.List es) = list <$> mapM transformExp es
 transformExp (HSE.Let (HSE.BDecls decls) body) =
     LetRec () <$> mapM transformDecl decls <*> transformExp body
 transformExp (HSE.Tuple _ args) =
-    Value () . mkTuple <$> mapM transformExp args
+    Value () . tuple <$> mapM transformExp args
 transformExp e = throwError $ "Unsupported exp: " ++ show e
-
--- opNameOp :: Var -> Maybe PrimOp'
--- opNameOp v = M.lookup v prims
---
--- -- TODO: Implement PrimOp parsing.
--- prims :: M.Map Var PrimOp'
--- prims = M.fromList symbols -- $ map (first $ HSE.UnQual . HSE.Symbol) symbols
---   where
---     symbols =
---       [ ("+", PrimOp' Add 2), ("-", PrimOp' Sub 2),
---         ("*", PrimOp' Mul 2), ("/", PrimOp' Div 2),
---         ("%", PrimOp' Mod 2), ("==", PrimOp' Eq 2),
---         ("<", PrimOp' LT 2), ("<=", PrimOp' LTE 2) ]
-
-mkTuple :: [Term'] -> Value'
-mkTuple ts = Data () ('(' : replicate (length ts - 1) ',' ++ ")") ts
 
 {- Disabling this as we don't have ANF terms anymore.
 
@@ -135,27 +136,21 @@ introLet t       f = do
       t'                -> return $ LetRec () [(v, t)] t'
 -}
 
-collectArgs :: [HSE.Pat] -> Parser [Var]
-collectArgs [] = return []
-collectArgs (HSE.PVar v : ps) = (nameVar v :) <$> collectArgs ps
-collectArgs (p : _) =
-    throwError $ "collectArgs: Unsupported pattern in function arguments: " ++ show p
-
 transformAlt :: HSE.Alt -> Parser (AltCon, Term')
 transformAlt (HSE.Alt _ pat rhs _) = (,) <$> transformPat pat <*> transformRhs rhs
 
 transformPat :: HSE.Pat -> Parser AltCon
 transformPat (HSE.PVar v) = return $ DefaultAlt (Just $ nameVar v)
 transformPat (HSE.PApp qname pats) =
-    DataAlt <$> transformQName qname <*> collectArgs pats
+    DataAlt <$> transformQName qname <*> collectPatArgs pats
 transformPat (HSE.PInfixApp p1 op p2) = do
-    DataAlt <$> transformQName op <*> collectArgs [p1, p2]
+    DataAlt <$> transformQName op <*> collectPatArgs [p1, p2]
 transformPat (HSE.PList []) = return $ DataAlt "[]" []
 transformPat (HSE.PLit _sign lit) = transformLitPat lit
 transformPat HSE.PWildCard = DefaultAlt . Just <$> freshVar
 transformPat (HSE.PTuple _boxed pats) = do
-    let con = '(' : replicate (length pats - 1) ',' ++ ")"
-    args <- collectArgs pats
+    let con = parens (replicate (length pats - 1) ',')
+    args <- collectPatArgs pats
     return $ DataAlt con args
 transformPat p = throwError $ "transformPat: Unsupported pattern: " ++ show p
 
@@ -167,14 +162,6 @@ transformLitPat l =
 transformLit :: HSE.Literal -> Parser Value'
 transformLit (HSE.Int i) = return $ Literal () $ Int i
 transformLit l = throwError $ "Unsupported literal expression: " ++ show l
-
-lambda :: [Var] -> Term' -> Term'
-lambda []       t = t
-lambda (v : vs) t = Value () $ Lambda () v (lambda vs t)
-
-list :: [Term'] -> Term'
-list ts = foldr (\h t -> App () (App () (Value () (Data () "(:)" [])) h) t)
-                (Value () (Data () "[]" [])) ts
 
 nameVar :: HSE.Name -> Var
 nameVar (HSE.Ident s)  = s
@@ -195,3 +182,58 @@ opName (HSE.QVarOp qName) = transformQName qName
 opName (HSE.QConOp qName) =
     -- FIXME: should be careful about partial constructor applications
     transformQName qName
+
+--------------------------------------------------------------------------------
+
+collectPatArgs :: [HSE.Pat] -> Parser [Var]
+collectPatArgs [] = return []
+collectPatArgs (HSE.PVar v : ps) = (nameVar v :) <$> collectPatArgs ps
+collectPatArgs (p : _) =
+    throwError $ "collectPatArgs: Unsupported pattern in function arguments: " ++ show p
+
+collectArgs :: HSE.Exp -> HSE.Exp -> (HSE.Exp, [HSE.Exp])
+collectArgs f arg = go f [arg]
+  where
+    go (HSE.App e1 e2) acc = go e1 (e2 : acc)
+    go e1              acc = (e1, acc)
+
+--------------------------------------------------------------------------------
+-- * Constructing complex terms
+
+app :: Term' -> [Term'] -> Term'
+app = foldl' (App ())
+
+lambda :: [Var] -> Term' -> Term'
+lambda []       t = t
+lambda (v : vs) t = Value () $ Lambda () v (lambda vs t)
+
+list :: [Term'] -> Term'
+list ts = foldr (\h t -> App () (App () (Value () (Data () "(:)" [])) h) t)
+                (Value () (Data () "[]" [])) ts
+
+tuple :: [Term'] -> Value'
+tuple ts = Data () ('(' : replicate (length ts - 1) ',' ++ ")") ts
+
+--------------------------------------------------------------------------------
+-- * Parsing primops
+
+checkPrimOp :: Var -> Maybe PrimOp'
+checkPrimOp v = M.lookup v prims
+
+-- TODO: What about prim ops used as (+) etc.?
+
+prims :: M.Map Var PrimOp'
+prims = M.fromList symbols
+  where
+    symbols =
+      [ ("(+)", PrimOp' Add 2), ("(-", PrimOp' Sub 2),
+        ("(*)", PrimOp' Mul 2), ("(/", PrimOp' Div 2),
+        ("(%)", PrimOp' Mod 2), ("(==)", PrimOp' Eq 2),
+        ("(<)", PrimOp' LT 2), ("(<=)", PrimOp' LTE 2) ]
+
+--------------------------------------------------------------------------------
+-- * Error messages
+
+primOpArityErr :: PrimOp' -> Int -> String
+primOpArityErr op applied =
+    "PrimOp " ++ show op ++ " applied to wrong number of arguments: " ++ show applied

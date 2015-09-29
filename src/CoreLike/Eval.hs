@@ -168,28 +168,35 @@ applyPrimOp Eq [Literal t1 (Int i1), Literal _ (Int i2)] =
 applyPrimOp op lits = error $ concat
     [ "Unhandled PrimOp ", show op, " args: ", show (map removeAnns lits) ]
 
-{-
 -- | Unwind the whole stack. Focus may not be a value.
 unwindAll :: State ann -> (Term ann, Env ann)
 unwindAll (t, e, []) = (t, e)
+
 unwindAll (val@(Value _ v), e, s@(f : fs)) =
     case unwind v e s of
       Just st -> unwindAll st
       Nothing ->
         case f of
-          Apply arg -> unwindAll (App val arg, e, fs)
-          Scrutinise cases -> unwindAll (Case val cases, e, fs)
-          PrimApply op vs ts ->
-            unwindAll (PrimOp op $ (map Value $ vs ++ [v]) ++ ts, e, fs)
-          Update var -> unwindAll (Value v, M.insert var val e, fs)
-unwindAll (t, e, Apply v : fs) = unwindAll (App t v, e, fs)
-unwindAll (t, e, Scrutinise cases : fs) = unwindAll (Case t cases, e, fs)
-unwindAll (t, e, PrimApply op vs ts : fs) =
-    unwindAll (PrimOp op $ map Value vs ++ ts ++ [t], e, fs)
-unwindAll (t, e, Update v : fs) =
-    -- TODO: This looks dangerous -- may duplicate lots of work.
-    unwindAll (t, M.insert v t e, fs)
+          Apply ann arg -> unwindAll (App ann val arg, e, fs)
+          Scrutinise ann cases -> unwindAll (Case ann val cases, e, fs)
+          PrimApply ann op vs ts ->
+            unwindAll (PrimOp ann op (map valTm vs ++ ts), e, fs)
+          Update ann var -> unwindAll (Value ann v, M.insert var val e, fs)
 
+unwindAll (t, e, Apply ann v : fs) = unwindAll (App ann t v, e, fs)
+
+unwindAll (t, e, Scrutinise ann cases : fs) = unwindAll (Case ann t cases, e, fs)
+
+unwindAll (t, e, PrimApply ann op vs ts : fs) =
+    unwindAll (PrimOp ann op (map valTm vs ++ ts ++ [t]), e, fs)
+
+unwindAll (t, e, Update ann v : fs) =
+    unwindAll (Var ann v, M.insert v t e, fs)
+
+valTm :: Value ann -> Term ann
+valTm v = Value (getAnnVal v) v
+
+{-
 -- | A "big-step" evaluator that takes steps until it's stuck. Returns new state
 -- and a list of heap bindings that are updated during the evaluation.
 --

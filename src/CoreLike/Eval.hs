@@ -31,6 +31,8 @@ data StackFrame ann
 type Stack ann = [StackFrame ann]
 
 type State ann = (Term ann, Env ann, Stack ann)
+type State'    = State ()
+
 
 -- Note [Pushing new variables to the environment]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -196,7 +198,6 @@ unwindAll (t, e, Update ann v : fs) =
 valTm :: Value ann -> Term ann
 valTm v = Value (getAnnVal v) v
 
-{-
 -- | A "big-step" evaluator that takes steps until it's stuck. Returns new state
 -- and a list of heap bindings that are updated during the evaluation.
 --
@@ -212,8 +213,8 @@ valTm v = Value (getAnnVal v) v
 --
 -- If it gets stuck on the way, then we see `Update x` once.
 --
-eval :: State -> Maybe (State, S.Set Var)
-eval s@(_, _, Update v : _) =
+eval :: State ann -> Maybe (State ann, S.Set Var)
+eval s@(_, _, Update _ v : _) =
     case evalStep s of
       Nothing -> Nothing
       Just s' ->
@@ -224,18 +225,18 @@ eval s = do
     s' <- evalStep s
     return $ fromMaybe (s', S.empty) $ eval s'
 
------------------------
+--------------------------------------------------------------------------------
 -- * Garbage collection
 
-gc :: Term -> Env -> Stack -> Env
+gc :: Term ann -> Env ann -> Stack ann -> Env ann
 gc root env stack =
     closure (M.fromList (mapMaybe lookupKV $ S.toList used))
   where
     used_stack = S.unions $ flip map stack $ \case
-      Apply v           -> S.singleton v
-      Scrutinise cases  -> S.unions $ map fvsCase cases
-      PrimApply _ vs ts -> S.unions $ map fvsVal vs ++ map fvsTerm ts
-      Update v          -> S.singleton v
+      Apply _ t           -> fvsTerm t
+      Scrutinise _ cases  -> S.unions $ map fvsCase cases
+      PrimApply _ _ vs ts -> S.unions $ map fvsVal vs ++ map fvsTerm ts
+      Update _ v          -> S.singleton v
 
     used_term = fvsTerm root
 
@@ -265,33 +266,37 @@ gc root env stack =
 --
 -- TODO: We can probably do some transformations like unboxing, by inlining
 -- literals.
-simplHeap :: Env -> Env
+simplHeap :: forall ann . Env ann -> Env ann
 simplHeap env = M.map removeLinks env
   where
-    removeLinks :: Term -> Term
-    removeLinks (Var v) = Var $ removeLinks' v
-    removeLinks (App f v) = App (removeLinks f) (removeLinks' v)
+    removeLinks :: Term ann -> Term ann
+    removeLinks (Var ann v) = Var ann $ removeLinks' v
+    removeLinks (App ann t1 t2) = App ann (removeLinks t1) (removeLinks t2)
     removeLinks t = t -- FIXME: We can improve this a lot
 
     removeLinks' :: Var -> Var
     removeLinks' v =
       case M.lookup v env of
-        Just (Var v') -> removeLinks' v'
-        _             -> v
+        Just (Var _ v') -> removeLinks' v'
+        _               -> v
 
------------------------------
+--------------------------------------------------------------------------------
 -- * Residual code generation
 
-residualize :: State -> Term
-residualize (term, env, []) = simpl $ LetRec (M.toList env) term
-residualize (term, env, Apply v : stack) = residualize (App term v, env, stack)
-residualize (term, env, Scrutinise cases : stack) =
-    residualize (Case term cases, env, stack)
-residualize (term, env, PrimApply op vs ts : stack) =
-    residualize (PrimOp op (map Value vs ++ term : ts), env, stack)
-residualize (term, env, Update v : stack) =
-    residualize (Var v, M.insert v term env, stack)
+-- TODO: We may need to add tags to states for this functions, similar to how we
+-- had to add tags to update frames to be able to implement `unwindAll`.
 
+-- residualize :: State ann -> Term ann
+-- residualize (term, env, []) = simpl $ LetRec (M.toList env) term
+-- residualize (term, env, Apply v : stack) = residualize (App term v, env, stack)
+-- residualize (term, env, Scrutinise cases : stack) =
+--     residualize (Case term cases, env, stack)
+-- residualize (term, env, PrimApply op vs ts : stack) =
+--     residualize (PrimOp op (map Value vs ++ term : ts), env, stack)
+-- residualize (term, env, Update v : stack) =
+--     residualize (Var v, M.insert v term env, stack)
+
+{-
 -----------------------------------------------
 -- * Splitting the state for evaluating further
 
@@ -419,24 +424,24 @@ combineFold _ (_, (s, _)) =
 drive :: State -> State
 drive = evalSplit 3 -- FIXME: limit splits to 10 for now
 
------------------------------------
+-}
+
+--------------------------------------------------------------------------------
 -- * Testing and utilities for REPL
 
-initState :: FilePath -> IO (Either String State)
+initState :: FilePath -> IO (Either String State')
 initState path =
-    fmap ((Value $ Data "()" [], , []) . M.fromList) <$> parseFile path
+    fmap ((Value () $ Data () "()" [], , []) . M.fromList) . parseModule <$> readFile path
 
-setTerm :: String -> State -> (Either String State)
+setTerm :: String -> State' -> (Either String State')
 setTerm termStr (_, env, stack) = (, env, stack) <$> parseTerm termStr
 
-initState' :: FilePath -> String -> IO State
+initState' :: FilePath -> String -> IO State'
 initState' path termStr = do
     st <- either error id <$> initState path
     return $ either error id $ setTerm termStr st
 
--}
-
----------------------------
+--------------------------------------------------------------------------------
 -- * Pretty-printing states
 
 ppTerm :: Term ann -> PP.Doc

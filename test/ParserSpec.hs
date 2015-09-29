@@ -31,7 +31,9 @@ spec = do
             let printed = HSE.prettyPrint $ hseModule bs in
             case parseModule printed of
               Left err -> assertFailure $ unlines
-                [ "Can't parse printed module:", printed, "error:", err ]
+                [ "Can't parse printed module:", printed,
+                  "printed AST:", showPretty bs,
+                  "error:", err ]
               Right bs' ->
                 assertEqStrs
                   ("Printed module is parsed differently\nprinted:\n" ++ printed)

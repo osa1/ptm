@@ -8,7 +8,6 @@ module CoreLike.Parser
 
 import Control.Monad.Except
 import Control.Monad.State.Strict
-import qualified Data.Map as M
 import qualified Language.Haskell.Exts as HSE
 import Prelude hiding (LT)
 
@@ -76,30 +75,21 @@ transformExp (HSE.Con qname) =
 transformExp (HSE.Lit lit) = Value () <$> transformLit lit
 
 transformExp (HSE.App e1 e2) = do
-    e1' <- checkPrimOp <$> transformExp e1
+    e1' <- transformExp e1
     e2' <- transformExp e2
     return $ App () e1' e2'
-  where
-    checkPrimOp :: Term' -> Term'
-    checkPrimOp (Var _ v)
-      | Just op <- opNameOp v
-      = PrimOp () op
-    checkPrimOp t = t
 
 transformExp (HSE.InfixApp e1 op e2) = do
     e1' <- transformExp e1
     e2' <- transformExp e2
     op' <- opName op
-    case opNameOp op' of
-      Just pOp -> return $ App () (App () (PrimOp () pOp) e1') e2'
-      Nothing ->
-        case op of
-          HSE.QConOp{} ->
-            -- FIXME: Make sure the application is not partial, in that case we
-            -- should be using function variant instead
-            return $ App () (App () (Value () $ Data () op' []) e1') e2'
-          HSE.QVarOp{} ->
-            return $ App () (App () (Var () op') e1') e2'
+    case op of
+      HSE.QConOp{} ->
+        -- FIXME: Make sure the application is not partial, in that case we
+        -- should be using function variant instead
+        return $ App () (App () (Value () $ Data () op' []) e1') e2'
+      HSE.QVarOp{} ->
+        return $ App () (App () (Var () op') e1') e2'
 
 transformExp (HSE.Lambda _ pats body) = lambda <$> collectArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
@@ -116,18 +106,18 @@ transformExp (HSE.Tuple _ args) =
     Value () . mkTuple <$> mapM transformExp args
 transformExp e = throwError $ "Unsupported exp: " ++ show e
 
-opNameOp :: Var -> Maybe PrimOp'
-opNameOp v = M.lookup v prims
-
--- TODO: Implement PrimOp parsing.
-prims :: M.Map Var PrimOp'
-prims = M.fromList symbols -- $ map (first $ HSE.UnQual . HSE.Symbol) symbols
-  where
-    symbols =
-      [ ("+", PrimOp' Add 2), ("-", PrimOp' Sub 2),
-        ("*", PrimOp' Mul 2), ("/", PrimOp' Div 2),
-        ("%", PrimOp' Mod 2), ("==", PrimOp' Eq 2),
-        ("<", PrimOp' LT 2), ("<=", PrimOp' LTE 2) ]
+-- opNameOp :: Var -> Maybe PrimOp'
+-- opNameOp v = M.lookup v prims
+--
+-- -- TODO: Implement PrimOp parsing.
+-- prims :: M.Map Var PrimOp'
+-- prims = M.fromList symbols -- $ map (first $ HSE.UnQual . HSE.Symbol) symbols
+--   where
+--     symbols =
+--       [ ("+", PrimOp' Add 2), ("-", PrimOp' Sub 2),
+--         ("*", PrimOp' Mul 2), ("/", PrimOp' Div 2),
+--         ("%", PrimOp' Mod 2), ("==", PrimOp' Eq 2),
+--         ("<", PrimOp' LT 2), ("<=", PrimOp' LTE 2) ]
 
 mkTuple :: [Term'] -> Value'
 mkTuple ts = Data () ('(' : replicate (length ts - 1) ',' ++ ")") ts
@@ -188,7 +178,10 @@ list ts = foldr (\h t -> App () (App () (Value () (Data () "(:)" [])) h) t)
 
 nameVar :: HSE.Name -> Var
 nameVar (HSE.Ident s)  = s
-nameVar (HSE.Symbol s) = s
+nameVar (HSE.Symbol s) = parens s
+
+parens :: String -> String
+parens s = '(' : s ++ ")"
 
 transformQName :: HSE.QName -> Parser Var
 transformQName q@HSE.Qual{} = throwError $ "Qualified names are not supported: " ++ show q

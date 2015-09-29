@@ -16,12 +16,7 @@ type Var = String
 
 type DataCon = String
 
-data PrimOpOp = Add | Sub | Mul | Div | Mod | Eq | LT | LTE
-  deriving (Show, Eq, Ord, Generic, Binary)
-
-type Arity = Int
-
-data PrimOp' = PrimOp' PrimOpOp Arity
+data PrimOp' = Add | Sub | Mul | Div | Mod | Eq | LT | LTE
   deriving (Show, Eq, Ord, Generic, Binary)
 
 data AltCon
@@ -37,7 +32,11 @@ data Literal
 
 data Term ann
   = Var ann Var
-  | PrimOp ann PrimOp'
+
+  | -- INVARIANT: Always fully saturated.
+    -- We don't generate this in the parser, only evaluator generates this.
+    PrimOp ann PrimOp' [Term ann]
+
   | Value ann (Value ann)
 
   | App ann (Term ann) (Term ann)
@@ -62,22 +61,22 @@ type Term' = Term ()
 type Value' = Value ()
 
 -- | Used to generate HSE symbols.
-primOpStr :: PrimOpOp -> String
-primOpStr Add = "+"
-primOpStr Sub = "-"
-primOpStr Mul = "*"
-primOpStr Div = "/"
-primOpStr Mod = "%"
-primOpStr Eq  = "=="
-primOpStr LT  = "<"
-primOpStr LTE = "<="
+primOpStr :: PrimOp' -> String
+primOpStr Add = "(+)"
+primOpStr Sub = "(-)"
+primOpStr Mul = "(*)"
+primOpStr Div = "(/)"
+primOpStr Mod = "(%)"
+primOpStr Eq  = "(==)"
+primOpStr LT  = "(<)"
+primOpStr LTE = "(<=)"
 
 --------------------------------------------------------------------------------
 -- * Working with annotations
 
 setAnn :: ann -> Term ann -> Term ann
 setAnn a (Var _ v) = Var a v
-setAnn a (PrimOp _ p) = PrimOp a p
+setAnn a (PrimOp _ p ts) = PrimOp a p ts
 setAnn a (Value _ v) = Value a v
 setAnn a (App _ t1 t2) = App a t1 t2
 setAnn a (Case _ t cs) = Case a t cs
@@ -85,7 +84,7 @@ setAnn a (LetRec _ bs t) = LetRec a bs t
 
 getAnn :: Term ann -> ann
 getAnn (Var a _) = a
-getAnn (PrimOp a _) = a
+getAnn (PrimOp a _ _) = a
 getAnn (Value a _) = a
 getAnn (App a _ _) = a
 getAnn (Case a _ _) = a

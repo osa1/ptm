@@ -18,7 +18,10 @@ termToHSE :: Term ann -> HSE.Exp
 termToHSE (Var _ v) =
     -- FIXME: This variable may contain dots, maybe take that into account
     HSE.Var (HSE.UnQual (HSE.Ident v))
-termToHSE (PrimOp _ (PrimOp' op _)) = HSE.Var (HSE.UnQual (HSE.Symbol (primOpStr op)))
+
+termToHSE (PrimOp _ op ts) =
+    app (HSE.Var (HSE.UnQual (HSE.Symbol (primOpStr op)))) (map termToHSE ts)
+
 termToHSE (Value _ v) = valueToHSE v
 termToHSE (App _ t1 t2) = HSE.App (termToHSE t1) (termToHSE t2)
 termToHSE (Case _ scr cases) =
@@ -76,6 +79,9 @@ bindToHSE (v, t) =
 litToHSE :: Literal -> HSE.Literal
 litToHSE (Int i) = HSE.Int i
 litToHSE (Char c) = HSE.Char c
+
+app :: HSE.Exp -> [HSE.Exp] -> HSE.Exp
+app = foldl' (flip HSE.App)
 
 dummyLoc :: HSE.SrcLoc
 dummyLoc = HSE.SrcLoc "" 0 0

@@ -28,6 +28,13 @@ spec = do
       fromHUnitTest $ TestLabel ("parsing and printing " ++ path) $ TestCase $
         ppp contents parseModule (HSE.prettyPrint . hseModule)
 
+    describe "parsing and printing primop exprs" $ do
+      fromHUnitTest $ TestLabel "a : b" $ TestCase $
+        ppp "a : b" parseTerm (HSE.prettyPrint . termToHSE)
+      fromHUnitTest $ TestLabel "a + b + c" $ TestCase $
+        ppp "a + b + c" parseTerm (HSE.prettyPrint . termToHSE)
+
+
 -- | A parse-print-parse assertion.
 ppp :: (Show a, Eq a)
     => String                      -- ^ string to ppp

@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass, ScopedTypeVariables #-}
 
 module CoreLike.Eval where
 
@@ -19,16 +19,16 @@ import CoreLike.ToHSE
 
 import Debug.Trace
 
-data StackFrame
-  = Apply Var
-  | Scrutinise [(AltCon, Term)]
-  | PrimApply PrimOp [Value] [Term]
+data StackFrame ann
+  = Apply (Term ann)
+  | Scrutinise [(AltCon, Term ann)]
+  | PrimApply PrimOp' [Value ann] [Term ann]
   | Update Var
-  deriving (Show, Eq, Generic, Binary)
+  deriving (Show, Eq, Functor, Generic, Binary)
 
-type Stack = [StackFrame]
+type Stack ann = [StackFrame ann]
 
-type State = (Term, Env, Stack)
+type State ann = (Term ann, Env ann, Stack ann)
 
 -- Note [Pushing new variables to the environment]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -51,71 +51,84 @@ type State = (Term, Env, Stack)
 --       M.insert accidentally and ruin everything.
 -- TODO: Document why we need to pass stack to add new bindings.
 
-envVars :: Env -> S.Set Var
+envVars :: Env ann -> S.Set Var
 envVars = M.keysSet
 
-updateVars :: Stack -> S.Set Var
+updateVars :: Stack ann -> S.Set Var
 updateVars s = S.fromList [ v | Update v <- s ]
 
-envVals :: Env -> [Var] -> [(Var, Term)]
+envVals :: Env ann -> [Var] -> [(Var, Term ann)]
 envVals e vs = mapMaybe (\v -> (v,) <$> M.lookup v e) vs
 
 -- NOTE: This updates RHSs of let bindings.
-mapVars :: [(Var, Term)] -> Env -> Stack -> Term -> (Env, Term)
+mapVars :: [(Var, Term ann)] -> Env ann -> Stack ann -> Term ann -> (Env ann, Term ann)
 mapVars binds env stack body = (env', body')
   where
     freshs    = freshVarsForPfx "l_"
                   (S.unions [envVars env, S.fromList (map fst binds),
                              vars body, updateVars stack])
-    renamings = zip (map fst binds) (map Var freshs)
-    body'     = substTerms renamings body
-    binds'    = zipWith (\l (_, r) -> (l, substTerms renamings r)) freshs binds
+    renamings = zip (map fst binds) freshs
+    body'     = renameTerms renamings body
+    binds'    = zipWith (\l (_, r) -> (l, renameTerms renamings r)) freshs binds
     env'      = foldl' (\e (v, t) -> M.insert v t e) env binds'
 
 -- NOTE: Doesn't update value of new variable.
-insertVar :: Var -> Term -> Env -> Stack -> Term -> (Env, Term)
+insertVar :: Var -> Term ann -> Env ann -> Stack ann -> Term ann -> (Env ann, Term ann)
 insertVar v t env stack body = (env', body')
   where
     fresh = head $ freshVarsFor (S.insert v $ envVars env `S.union` updateVars stack)
     env'  = M.insert fresh t env
-    body' = substTerm v (Var fresh) body
+    body' = renameTerm v fresh body
 
-evalStep :: State -> Maybe State
-evalStep (Var v, env, stack) = (, M.delete v env, Update v : stack) <$> M.lookup v env
-evalStep (Value v, env, stack) = unwind v env stack
-evalStep (App t v, env, stack) = Just (t, env, Apply v : stack)
-evalStep (PrimOp op (arg1 : args), env, stack) =
+evalStep :: State ann -> Maybe (State ann)
+evalStep (Var _ v, env, stack) = (, M.delete v env, Update v : stack) <$> M.lookup v env
+evalStep (Value ann v, env, stack) = unwind v env stack
+evalStep (App _ t1 t2, env, stack) = Just (t1, env, Apply t2 : stack)
+evalStep (PrimOp _ op (arg1 : args), env, stack) =
     Just (arg1, env, PrimApply op [] args : stack)
-evalStep (PrimOp op [], _, _) = error $ "evalStep: PrimOp without arguments: " ++ show op
-evalStep (Case scr cases, env, stack) = Just (scr, env, Scrutinise cases : stack)
-evalStep (LetRec binds rhs, env, stack) =
+evalStep (PrimOp _ op [], _, _) =
+    -- TODO: Maybe we should just get stuck?
+    error $ "evalStep: PrimOp without arguments: " ++ show op
+evalStep (Case _ scr cases, env, stack) = Just (scr, env, Scrutinise cases : stack)
+evalStep (LetRec _ binds rhs, env, stack) =
     let (env', rhs') = mapVars binds env stack rhs in Just (rhs', env', stack)
 
-unwind :: Value -> Env -> Stack -> Maybe State
+unwind :: forall ann . Value ann -> Env ann -> Stack ann -> Maybe (State ann)
 unwind _ _ [] = Nothing
+
 unwind val env (Update var : stack) =
     -- it's OK to just update the env here
-    Just (Value val, M.insert var (Value val) env, stack)
-unwind (Lambda arg body) env (Apply v : stack) =
-    let (env', body') = insertVar arg (Var v) env stack body in Just (body', env', stack)
+    Just (Value valAnn val, M.insert var (Value valAnn val) env, stack)
+  where valAnn = getAnnVal val
+
+unwind (Lambda _ arg body) env (Apply t : stack) =
+    let (env', body') = insertVar arg t env stack body in Just (body', env', stack)
+
 -- TODO: not sure about this case (same thing also exists in symbolic evaluator)
-unwind (Data con as) env (Apply v : stack) = Just (Value $ Data con (as ++ [v]), env, stack)
-unwind v@(Data con args) env (Scrutinise cases : stack) = findCase cases
+unwind (Data ann con as) env (Apply v : stack) =
+      Just (Value ann $ Data ann con (as ++ [v]), env, stack)
+
+unwind v@(Data ann con args) env (Scrutinise cases : stack) =
+    findCase cases
   where
-    findCase :: [(AltCon, Term)] -> Maybe State
+    findCase :: [(AltCon, Term ann)] -> Maybe (State ann)
     findCase [] = Nothing
     findCase ((DataAlt con' args', rhs) : rest)
       | con == con' =
-          let (env', rhs') = mapVars (zip args' (map Var args)) env stack rhs
+          let (env', rhs') = mapVars (zip args' args) env stack rhs
            in Just (rhs', env', stack)
       | otherwise   = findCase rest
     findCase ((LiteralAlt{}, _) : rest) = findCase rest
     findCase ((DefaultAlt Nothing, rhs) : _) = Just (rhs, env, stack)
     findCase ((DefaultAlt (Just d), rhs) : _) =
-      let (env', rhs') = insertVar d (Value v) env stack rhs in Just (rhs', env', stack)
-unwind v@(Literal lit) env (Scrutinise cases : stack) = findCase cases
+      let (env', rhs') = insertVar d (Value ann v) -- TODO: Not sure about this tag
+                                     env stack rhs
+       in Just (rhs', env', stack)
+
+unwind v@(Literal ann lit) env (Scrutinise cases : stack) =
+    findCase cases
   where
-    findCase :: [(AltCon, Term)] -> Maybe State
+    findCase :: [(AltCon, Term ann)] -> Maybe (State ann)
     findCase [] = Nothing
     findCase ((DataAlt{}, _) : rest) = findCase rest
     findCase ((LiteralAlt lit', rhs) : rest)
@@ -123,28 +136,51 @@ unwind v@(Literal lit) env (Scrutinise cases : stack) = findCase cases
       | otherwise   = findCase rest
     findCase ((DefaultAlt Nothing, rhs) : _) = Just (rhs, env, stack)
     findCase ((DefaultAlt (Just d), rhs) : _) =
-      let (env', rhs') = insertVar d (Value v) env stack rhs in Just (rhs', env', stack)
-unwind v env (PrimApply op vals [] : stack) =
-    Just . (, env, stack) . Value $ applyPrimOp op (vals ++ [v])
+      let (env', rhs') = insertVar d (Value ann v) env stack rhs
+       in Just (rhs', env', stack)
+
+unwind v env (PrimApply (PrimOp' op _) vals [] : stack) =
+    Just $ (, env, stack) $ Value (getAnnVal primOpRet) primOpRet
+  where primOpRet = applyPrimOp op (vals ++ [v])
+
 unwind v env (PrimApply op vals (t : ts) : stack) =
     Just (t, env, PrimApply op (vals ++ [v]) ts : stack)
+
 unwind v _ s =
     error $ "unwind: Found ill-typed term, is this a bug?\n"
-            ++ "value: " ++ show v ++ "stack: " ++ show s
+            ++ "value: " ++ show (removeAnns v) ++ "stack: " ++ show (map removeAnns s)
 
+-- TODO: We should probably experiment with different taggings here.
+applyPrimOp :: PrimOpOp -> [Value ann] -> Value ann
+applyPrimOp Add [Literal t1 (Int i1), Literal _ (Int i2)] =
+    Literal t1 $ Int $ i1 + i2
+applyPrimOp Sub [Literal t1 (Int i1), Literal _ (Int i2)] =
+    Literal t1 $ Int $ i1 - i2
+applyPrimOp Mul [Literal t1 (Int i1), Literal _ (Int i2)] =
+    Literal t1 $ Int $ i1 * i2
+applyPrimOp Div [Literal t1 (Int i1), Literal _ (Int i2)] =
+    Literal t1 $ Int $ i1 `div` i2
+applyPrimOp Mod [Literal t1 (Int i1), Literal _ (Int i2)] =
+    Literal t1 $ Int $ i1 `mod` i2
+applyPrimOp Eq [Literal t1 (Int i1), Literal _ (Int i2)] =
+    Data t1 (if i1 == i2 then "True" else "False") []
+applyPrimOp op lits = error $ concat
+    [ "Unhandled PrimOp ", show op, " args: ", show (map removeAnns lits) ]
+
+{-
 -- | Unwind the whole stack. Focus may not be a value.
-unwindAll :: State -> (Term, Env)
+unwindAll :: State ann -> (Term ann, Env ann)
 unwindAll (t, e, []) = (t, e)
-unwindAll (Value v, e, s@(f : fs)) =
+unwindAll (val@(Value _ v), e, s@(f : fs)) =
     case unwind v e s of
       Just st -> unwindAll st
       Nothing ->
         case f of
-          Apply arg -> unwindAll (App (Value v) arg, e, fs)
-          Scrutinise cases -> unwindAll (Case (Value v) cases, e, fs)
+          Apply arg -> unwindAll (App val arg, e, fs)
+          Scrutinise cases -> unwindAll (Case val cases, e, fs)
           PrimApply op vs ts ->
             unwindAll (PrimOp op $ (map Value $ vs ++ [v]) ++ ts, e, fs)
-          Update var -> unwindAll (Value v, M.insert var (Value v) e, fs)
+          Update var -> unwindAll (Value v, M.insert var val e, fs)
 unwindAll (t, e, Apply v : fs) = unwindAll (App t v, e, fs)
 unwindAll (t, e, Scrutinise cases : fs) = unwindAll (Case t cases, e, fs)
 unwindAll (t, e, PrimApply op vs ts : fs) =
@@ -152,21 +188,6 @@ unwindAll (t, e, PrimApply op vs ts : fs) =
 unwindAll (t, e, Update v : fs) =
     -- TODO: This looks dangerous -- may duplicate lots of work.
     unwindAll (t, M.insert v t e, fs)
-
-applyPrimOp :: PrimOp -> [Value] -> Value
-applyPrimOp Add [Literal (Int i1), Literal (Int i2)] =
-    Literal $ Int $ i1 + i2
-applyPrimOp Sub [Literal (Int i1), Literal (Int i2)] =
-    Literal $ Int $ i1 - i2
-applyPrimOp Mul [Literal (Int i1), Literal (Int i2)] =
-    Literal $ Int $ i1 * i2
-applyPrimOp Div [Literal (Int i1), Literal (Int i2)] =
-    Literal $ Int $ i1 `div` i2
-applyPrimOp Mod [Literal (Int i1), Literal (Int i2)] =
-    Literal $ Int $ i1 `mod` i2
-applyPrimOp Eq [Literal (Int i1), Literal (Int i2)] =
-    Data (if i1 == i2 then "True" else "False") []
-applyPrimOp op lits = error $ "Unhandled PrimOp " ++ show op ++ " args: " ++ show lits
 
 -- | A "big-step" evaluator that takes steps until it's stuck. Returns new state
 -- and a list of heap bindings that are updated during the evaluation.
@@ -405,45 +426,47 @@ initState' path termStr = do
     st <- either error id <$> initState path
     return $ either error id $ setTerm termStr st
 
+-}
+
 ---------------------------
 -- * Pretty-printing states
 
-ppTerm :: Term -> PP.Doc
+ppTerm :: Term ann -> PP.Doc
 ppTerm = PP.string . HSE.prettyPrint . termToHSE
 
-ppEnv :: Env -> PP.Doc
+ppEnv :: Env ann -> PP.Doc
 ppEnv =
     PP.list
     . map (\(k, v) -> PP.nest 4 (PP.text k PP.<+> PP.text "=" PP.</>
                                    PP.string (HSE.prettyPrint (termToHSE v))))
     . M.toList
 
-ppStack :: Stack -> PP.Doc
+ppStack :: Stack ann -> PP.Doc
 ppStack = PP.list . map ppStackFrame . reverse
 
 -- haskell-src-exts doesn't export methods for generating `Doc`, and even if it
 -- did we couldn't incorporate it easily since it's using `pretty`. So we just
 -- pretty-print terms, wrap them with `PP.string` and hope that `wl-pprint`
 -- won't remove newlines.
-ppStackFrame :: StackFrame -> PP.Doc
-ppStackFrame = PP.string . HSE.prettyPrint . termToHSE . ppF
+ppStackFrame :: StackFrame ann -> PP.Doc
+ppStackFrame = PP.string . HSE.prettyPrint . termToHSE . ppF . removeAnns
   where
-    ppF (Apply v) = App (Var "●") v
-    ppF (Scrutinise cases) = Case (Var "●") cases
-    ppF (PrimApply op vs ts) = PrimOp op (map Value vs ++ ts)
-    ppF (Update v) = Value $ Data "Update" [v]
+    ppF (Apply t) = App () (Var () "●") (removeAnns t)
+    ppF (Scrutinise cases) = Case () (Var () "●") cases
+    ppF (PrimApply op vs ts) = PrimOp () op (map (Value ()) vs ++ ts)
+    ppF (Update v) = Value () (Data () "Update" [Var () v])
 
-ppState :: State -> PP.Doc
+ppState :: State ann -> PP.Doc
 ppState (t, e, s) = PP.tupled [ ppEnv e, ppStack s, ppTerm t ]
 
-ppStates :: [State] -> PP.Doc
+ppStates :: [State ann] -> PP.Doc
 ppStates = PP.list . map ppState
 
 showDoc :: PP.Doc -> String
 showDoc = flip PP.displayS "" . PP.renderPretty 0.8 100
 
-showState :: State -> String
+showState :: State ann -> String
 showState = showDoc . ppState
 
-showStates :: [State] -> String
+showStates :: [State ann] -> String
 showStates = showDoc . ppStates

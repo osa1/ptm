@@ -19,11 +19,13 @@ import CoreLike.ToHSE
 
 import Debug.Trace
 
+-- We annotate frames too, to be able to generate tagged terms when
+-- residualizing partially evaluated code. (see `unwindAll`)
 data StackFrame ann
-  = Apply (Term ann)
-  | Scrutinise [(AltCon, Term ann)]
-  | PrimApply PrimOp' [Value ann] [Term ann]
-  | Update Var
+  = Apply ann (Term ann)
+  | Scrutinise ann [(AltCon, Term ann)]
+  | PrimApply ann PrimOp' [Value ann] [Term ann]
+  | Update ann Var
   deriving (Show, Eq, Functor, Generic, Binary)
 
 type Stack ann = [StackFrame ann]
@@ -55,7 +57,7 @@ envVars :: Env ann -> S.Set Var
 envVars = M.keysSet
 
 updateVars :: Stack ann -> S.Set Var
-updateVars s = S.fromList [ v | Update v <- s ]
+updateVars s = S.fromList [ v | Update _ v <- s ]
 
 envVals :: Env ann -> [Var] -> [(Var, Term ann)]
 envVals e vs = mapMaybe (\v -> (v,) <$> M.lookup v e) vs
@@ -81,34 +83,33 @@ insertVar v t env stack body = (env', body')
     body' = renameTerm v fresh body
 
 evalStep :: State ann -> Maybe (State ann)
-evalStep (Var _ v, env, stack) = (, M.delete v env, Update v : stack) <$> M.lookup v env
+evalStep (Var ann v, env, stack) = (, M.delete v env, Update ann v : stack) <$> M.lookup v env
 evalStep (Value ann v, env, stack) = unwind v env stack
-evalStep (App _ t1 t2, env, stack) = Just (t1, env, Apply t2 : stack)
-evalStep (PrimOp _ op (arg1 : args), env, stack) =
-    Just (arg1, env, PrimApply op [] args : stack)
+evalStep (App ann t1 t2, env, stack) = Just (t1, env, Apply ann t2 : stack)
+evalStep (PrimOp ann op (arg1 : args), env, stack) =
+    Just (arg1, env, PrimApply ann op [] args : stack)
 evalStep (PrimOp _ op [], _, _) =
     -- TODO: Maybe we should just get stuck?
     error $ "evalStep: PrimOp without arguments: " ++ show op
-evalStep (Case _ scr cases, env, stack) = Just (scr, env, Scrutinise cases : stack)
+evalStep (Case ann scr cases, env, stack) = Just (scr, env, Scrutinise ann cases : stack)
 evalStep (LetRec _ binds rhs, env, stack) =
     let (env', rhs') = mapVars binds env stack rhs in Just (rhs', env', stack)
 
 unwind :: forall ann . Value ann -> Env ann -> Stack ann -> Maybe (State ann)
 unwind _ _ [] = Nothing
 
-unwind val env (Update var : stack) =
+unwind val env (Update ann var : stack) =
     -- it's OK to just update the env here
-    Just (Value valAnn val, M.insert var (Value valAnn val) env, stack)
-  where valAnn = getAnnVal val
+    Just (Value ann val, M.insert var (Value ann val) env, stack)
 
-unwind (Lambda _ arg body) env (Apply t : stack) =
+unwind (Lambda _ arg body) env (Apply _ t : stack) =
     let (env', body') = insertVar arg t env stack body in Just (body', env', stack)
 
 -- TODO: not sure about this case (same thing also exists in symbolic evaluator)
-unwind (Data ann con as) env (Apply v : stack) =
+unwind (Data ann con as) env (Apply _ v : stack) =
       Just (Value ann $ Data ann con (as ++ [v]), env, stack)
 
-unwind v@(Data ann con args) env (Scrutinise cases : stack) =
+unwind v@(Data _ con args) env (Scrutinise ann cases : stack) =
     findCase cases
   where
     findCase :: [(AltCon, Term ann)] -> Maybe (State ann)
@@ -125,7 +126,7 @@ unwind v@(Data ann con args) env (Scrutinise cases : stack) =
                                      env stack rhs
        in Just (rhs', env', stack)
 
-unwind v@(Literal ann lit) env (Scrutinise cases : stack) =
+unwind v@(Literal _ lit) env (Scrutinise ann cases : stack) =
     findCase cases
   where
     findCase :: [(AltCon, Term ann)] -> Maybe (State ann)
@@ -139,12 +140,12 @@ unwind v@(Literal ann lit) env (Scrutinise cases : stack) =
       let (env', rhs') = insertVar d (Value ann v) env stack rhs
        in Just (rhs', env', stack)
 
-unwind v env (PrimApply (PrimOp' op _) vals [] : stack) =
-    Just $ (, env, stack) $ Value (getAnnVal primOpRet) primOpRet
+unwind v env (PrimApply ann (PrimOp' op _) vals [] : stack) =
+    Just $ (, env, stack) $ Value ann primOpRet
   where primOpRet = applyPrimOp op (vals ++ [v])
 
-unwind v env (PrimApply op vals (t : ts) : stack) =
-    Just (t, env, PrimApply op (vals ++ [v]) ts : stack)
+unwind v env (PrimApply ann op vals (t : ts) : stack) =
+    Just (t, env, PrimApply ann op (vals ++ [v]) ts : stack)
 
 unwind v _ s =
     error $ "unwind: Found ill-typed term, is this a bug?\n"
@@ -451,10 +452,10 @@ ppStack = PP.list . map ppStackFrame . reverse
 ppStackFrame :: StackFrame ann -> PP.Doc
 ppStackFrame = PP.string . HSE.prettyPrint . termToHSE . ppF . removeAnns
   where
-    ppF (Apply t) = App () (Var () "●") (removeAnns t)
-    ppF (Scrutinise cases) = Case () (Var () "●") cases
-    ppF (PrimApply op vs ts) = PrimOp () op (map (Value ()) vs ++ ts)
-    ppF (Update v) = Value () (Data () "Update" [Var () v])
+    ppF (Apply _ t) = App () (Var () "●") (removeAnns t)
+    ppF (Scrutinise _ cases) = Case () (Var () "●") cases
+    ppF (PrimApply _ op vs ts) = PrimOp () op (map (Value ()) vs ++ ts)
+    ppF (Update _ v) = Value () (Data () "Update" [Var () v])
 
 ppState :: State ann -> PP.Doc
 ppState (t, e, s) = PP.tupled [ ppEnv e, ppStack s, ppTerm t ]

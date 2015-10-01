@@ -256,6 +256,9 @@ gc root env stack =
 
     lookupKV k = (k,) <$> M.lookup k env
 
+gcState :: State ann -> State ann
+gcState (tm, env, s) = (tm, gc tm env s, s)
+
 -- | Remove indirections from the heap.
 --
 -- E.g. if we have
@@ -450,6 +453,9 @@ initState' path termStr = do
 
 ppTerm :: Term ann -> PP.Doc
 ppTerm = PP.string . HSE.prettyPrint . termToHSE
+
+ppValue :: Value ann -> PP.Doc
+ppValue = PP.string . HSE.prettyPrint . valueToHSE
 
 ppEnv :: Env ann -> PP.Doc
 ppEnv =

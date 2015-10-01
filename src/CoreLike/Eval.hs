@@ -149,9 +149,13 @@ unwind v env (PrimApply ann (PrimOp' op _) vals [] : stack) =
 unwind v env (PrimApply ann op vals (t : ts) : stack) =
     Just (t, env, PrimApply ann op (vals ++ [v]) ts : stack)
 
-unwind v _ s =
-    error $ "unwind: Found ill-typed term, is this a bug?\n"
-            ++ "value: " ++ show (removeAnns v) ++ "stack: " ++ show (map removeAnns s)
+unwind v@Lambda{} _ s@(Scrutinise{} : _) =
+    error $ "unwind: Can't pattern match on lambda.\n" ++
+            "value:\n" ++ show (ppValue v) ++ "\nstack:\n" ++ show (ppStack s)
+
+unwind v@Literal{} _ s@(Apply{} : _) =
+    error $ "unwind: Can't apply literal.\n" ++
+            "value:\n" ++ show (ppValue v) ++ "\nstack:\n" ++ show (ppStack s)
 
 -- TODO: We should probably experiment with different taggings here.
 applyPrimOp :: PrimOpOp -> [Value ann] -> Value ann

@@ -1,10 +1,12 @@
-{-# LANGUAGE DeriveAnyClass, ScopedTypeVariables #-}
+{-# LANGUAGE DeriveAnyClass, DeriveFoldable, DeriveTraversable,
+             ScopedTypeVariables #-}
 
 module CoreLike.Eval where
 
+import qualified Control.Monad.State.Strict as St
 import Data.Binary (Binary)
+import Data.Foldable (toList)
 import Data.List (foldl')
-import Data.List ((\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as S
@@ -26,13 +28,12 @@ data StackFrame ann
   | Scrutinise ann [(AltCon, Term ann)]
   | PrimApply ann PrimOp' [Value ann] [Term ann]
   | Update ann Var
-  deriving (Show, Eq, Functor, Generic, Binary)
+  deriving (Show, Eq, Functor, Traversable, Foldable, Generic, Binary)
 
 type Stack ann = [StackFrame ann]
 
 type State ann = (Term ann, Env ann, Stack ann)
 type State'    = State ()
-
 
 -- Note [Pushing new variables to the environment]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -95,7 +96,8 @@ evalStep (PrimOp _ op [], _, _) =
     error $ "evalStep: PrimOp without arguments: " ++ show op
 evalStep (Case ann scr cases, env, stack) = Just (scr, env, Scrutinise ann cases : stack)
 evalStep (LetRec _ binds rhs, env, stack) =
-    let (env', rhs') = mapVars binds env stack rhs in Just (rhs', env', stack)
+    let (env', rhs') = mapVars binds env stack rhs
+     in Just (rhs', env', stack)
 
 unwind :: forall ann . Value ann -> Env ann -> Stack ann -> Maybe (State ann)
 unwind _ _ [] = Nothing
@@ -149,13 +151,16 @@ unwind v env (PrimApply ann (PrimOp' op _) vals [] : stack) =
 unwind v env (PrimApply ann op vals (t : ts) : stack) =
     Just (t, env, PrimApply ann op (vals ++ [v]) ts : stack)
 
-unwind v@Lambda{} _ s@(Scrutinise{} : _) =
+unwind v@Lambda{} _env s@(Scrutinise{} : _) =
     error $ "unwind: Can't pattern match on lambda.\n" ++
             "value:\n" ++ show (ppValue v) ++ "\nstack:\n" ++ show (ppStack s)
+            -- ++ "\nenv:\n" ++ show (ppEnv (gc (Value (getAnnVal v) v) _env s))
 
-unwind v@Literal{} _ s@(Apply{} : _) =
+unwind v@Literal{} _env s@(Apply{} : _) =
     error $ "unwind: Can't apply literal.\n" ++
             "value:\n" ++ show (ppValue v) ++ "\nstack:\n" ++ show (ppStack s)
+            -- ++ "\nenv:\n" ++ show (ppEnv (gc (Value (getAnnVal v) v) _env s))
+
 
 -- TODO: We should probably experiment with different taggings here.
 applyPrimOp :: PrimOpOp -> [Value ann] -> Value ann
@@ -229,6 +234,22 @@ eval s = do
     s' <- evalStep s
     return $ fromMaybe (s', S.empty) $ eval s'
 
+data StopReason = Stuck | Termination
+  deriving (Eq, Show)
+
+-- | A variant of 'eval' that does termination checking.
+--
+evalTC :: TaggedState -> (TaggedState, StopReason)
+evalTC s0 = go s0 []
+  where
+    go s hist =
+      case terminate hist s of
+        Continue hist' ->
+          case evalStep s of
+            Nothing -> (s, Stuck)
+            Just s' -> go s' hist'
+        Stop -> (s, Termination)
+
 --------------------------------------------------------------------------------
 -- * Garbage collection
 
@@ -286,6 +307,70 @@ simplHeap env = M.map removeLinks env
       case M.lookup v env of
         Just (Var _ v') -> removeLinks' v'
         _               -> v
+
+--------------------------------------------------------------------------------
+-- * Tag-bag related stuff
+--   (can't move to a different module without creating awful .boot files)
+
+type Tag = Int
+type TagBag = [Tag]
+
+type TaggedTerm  = Term Tag
+type TaggedValue = Value Tag
+type TaggedState = State Tag
+type TaggedEnv   = Env Tag
+type TaggedStackFrame = StackFrame Tag
+type TaggedStack = Stack Tag
+
+-- tagTerm :: Term ann -> TaggedTerm
+-- tagTerm tm = St.evalState (traverse (const freshTag) tm) 1
+--   where
+--     freshTag = do t <- St.get; St.put (t + 1); return t
+
+tagTerm' :: Term ann -> St.State Tag TaggedTerm
+tagTerm' = traverse (const freshTag)
+
+freshTag :: St.State Tag Tag
+freshTag = do t <- St.get; St.put (t + 1); return t
+
+tagEnv' :: Env ann -> St.State Tag TaggedEnv
+tagEnv' = traverse tagTerm'
+
+tagStack' :: Stack ann -> St.State Tag TaggedStack
+tagStack' = mapM tagStackFrame'
+
+tagStackFrame' :: StackFrame ann -> St.State Tag TaggedStackFrame
+tagStackFrame' = traverse (const freshTag)
+
+tagState' :: State ann -> St.State Tag TaggedState
+tagState' (t, e, s) = (,,) <$> tagTerm' t <*> tagEnv' e <*> tagStack' s
+
+tagState :: State ann -> TaggedState
+tagState s = St.evalState (tagState' s) 1
+
+tagBag :: Foldable f => f Tag -> [Tag]
+tagBag = toList
+
+tagBagEnv :: TaggedEnv -> [Tag]
+tagBagEnv = concatMap tagBag . M.elems
+
+tagBagStack :: TaggedStack -> [Tag]
+tagBagStack = concatMap tagBag
+
+(<|) :: TagBag -> TagBag -> Bool
+(<|) ts1 ts2 = S.fromList ts1 == S.fromList ts2 && length ts1 /= length ts2
+
+type History = [(TaggedState, TagBag)]
+
+data TermRes = Stop | Continue History
+
+terminate :: History -> TaggedState -> TermRes
+terminate prevs here@(t, e, s)
+  | any (<| currentTB) (map snd prevs) = Stop
+  | otherwise                          = Continue ((here, currentTB) : prevs)
+  where
+    currentTB :: TagBag
+    currentTB = tagBag t ++ tagBagEnv e ++ tagBagStack s
 
 --------------------------------------------------------------------------------
 -- * Residual code generation

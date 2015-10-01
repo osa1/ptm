@@ -20,7 +20,7 @@ library
     CoreLike.Simplify
     -- CoreLike.Step
     CoreLike.Syntax
-    CoreLike.TagBag
+    -- CoreLike.TagBag
     CoreLike.ToHSE
     CoreLike.Utils
 

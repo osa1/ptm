@@ -14,9 +14,11 @@ import Test.HUnit
 
 import CoreLike.Eval
 import CoreLike.Parser
-import CoreLike.Simplify
+-- import CoreLike.Simplify
+import CoreLike.Utils (showPretty)
 -- import CoreLike.Step
 import CoreLike.Syntax
+
 import TestUtils
 
 main :: IO ()
@@ -28,6 +30,32 @@ spec = do
       env <- (M.fromList . fromRight) <$> runIO (parseModule <$> readFile "Prelude.hs")
       fromHUnitTest $ TestList $
         map (\p -> TestLabel p $ TestCase (bigStepNoSplit env p)) programs
+
+      fromHUnitTest $ TestLabel "Termination tests" $ TestList $
+        map (\p -> TestLabel p $ TestCase (tmCheckAssert env p)) programs
+
+    describe "Renaming" $ fromHUnitTest $ TestList $
+      [ assertRenaming  "a" "a" "x" "x"
+      , assertRenaming  "a + b" "a" "x" "x + b"
+      , assertRenamings "a + b" [("a", "x"), ("b", "y")] "x + y"
+      , assertRenaming  "\\x -> x + 1" "x" "a" "\\x -> x + 1"
+      ]
+
+assertRenaming :: String -> Var -> Var -> String -> Test
+assertRenaming tm_s v1 v2 exp_s = TestLabel tm_s $ TestCase $ do
+    t1 <- parseAssert tm_s
+    t2 <- parseAssert exp_s
+    let renaming = renameTerm v1 v2 t1
+    assertEqStrs "Unexpected renaming result"
+      t2 renaming (showPretty t2) (showPretty renaming)
+
+assertRenamings :: String -> [(Var, Var)] -> String -> Test
+assertRenamings tm_s vs exp_s = TestLabel tm_s $ TestCase $ do
+    t1 <- parseAssert tm_s
+    t2 <- parseAssert exp_s
+    let renaming = renameTerms vs t1
+    assertEqStrs "Unexpected renaming result"
+      t2 renaming (showPretty t2) (showPretty renaming)
 
 isValue :: Term' -> Assertion
 isValue Value{} = return ()
@@ -48,6 +76,17 @@ bigStepNoSplit env s = do
       Just (state@(tm', env', stack), updates) ->
         assertBool ("Stack is not empty. State:\n" ++ show (ppState (gcState state)))
                    (null stack)
+
+tmCheckAssert :: Env' -> String -> Assertion
+tmCheckAssert env s = do
+    tm <- parseAssert s
+    let taggedState = tagState (tm, env, [])
+        (ret, reason) = evalTC taggedState
+    case reason of
+      Stuck -> return ()
+      Termination ->
+        assertFailure $ "Stopped because of termination check. Last state:\n" ++
+                        show (ppState (gcState ret))
 
 -- bigStepNoSplit :: Env -> String -> Assertion
 -- bigStepNoSplit env term = iter (simpl $ parseTerm' term)

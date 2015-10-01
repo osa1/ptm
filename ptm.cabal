@@ -15,7 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:
     -- CoreLike.Debug
-    -- CoreLike.Eval
+    CoreLike.Eval
     CoreLike.Parser
     CoreLike.Simplify
     -- CoreLike.Step

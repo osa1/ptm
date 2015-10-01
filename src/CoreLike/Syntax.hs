@@ -61,8 +61,9 @@ data Value ann
 
 type Env ann = M.Map Var (Term ann)
 
-type Term' = Term ()
+type Term'  = Term ()
 type Value' = Value ()
+type Env'   = Env ()
 
 -- | Used to generate HSE symbols.
 primOpStr :: PrimOpOp -> String

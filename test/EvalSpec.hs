@@ -12,9 +12,10 @@ import Test.Hspec
 import Test.Hspec.Contrib.HUnit
 import Test.HUnit
 
+import CoreLike.Eval
 import CoreLike.Parser
 import CoreLike.Simplify
-import CoreLike.Step
+-- import CoreLike.Step
 import CoreLike.Syntax
 import TestUtils
 
@@ -24,24 +25,38 @@ main = hspec spec
 spec :: Spec
 spec = do
     describe "evaluation" $ do
-      env <- (M.fromList . fromRight) <$> runIO (parseFile "Prelude.hs")
+      env <- (M.fromList . fromRight) <$> runIO (parseModule <$> readFile "Prelude.hs")
       fromHUnitTest $ TestList $
         map (\p -> TestLabel p $ TestCase (bigStepNoSplit env p)) programs
 
-isValue :: Term -> Assertion
+isValue :: Term' -> Assertion
 isValue Value{} = return ()
-isValue (LetRec _ Value{}) = return ()
+isValue (LetRec _ _ Value{}) = return ()
 isValue notVal    = assertFailure (show notVal ++ " is not a value.")
 
-bigStepNoSplit :: Env -> String -> Assertion
-bigStepNoSplit env term = iter (simpl $ parseTerm' term)
-  where
-    iter :: Term -> Assertion
-    iter t =
-      case step env t of
-        Transient t' -> iter $ simpl t'
-        Split _      -> assertFailure $ "`step` returned Split for term " ++ show t
-        Stuck        -> isValue t
+parseAssert :: String -> Assertion' Term'
+parseAssert s =
+    case parseTerm s of
+      Left err -> assertFailure ("Can't parse " ++ s ++ ": " ++ err) >> undefined
+      Right tm -> return tm
+
+bigStepNoSplit :: Env' -> String -> Assertion
+bigStepNoSplit env s = do
+    tm <- parseAssert s
+    case eval (tm, env, []) of
+      Nothing -> assertFailure "Can't evaluate term"
+      Just ((tm', env', stack), updates) ->
+        assertBool ("Stack is not empty:\n" ++ show (ppStack stack)) (null stack)
+
+-- bigStepNoSplit :: Env -> String -> Assertion
+-- bigStepNoSplit env term = iter (simpl $ parseTerm' term)
+--   where
+--     iter :: Term -> Assertion
+--     iter t =
+--       case step env t of
+--         Transient t' -> iter $ simpl t'
+--         Split _      -> assertFailure $ "`step` returned Split for term " ++ show t
+--         Stuck        -> isValue t
 
 programs :: [String]
 programs =

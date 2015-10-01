@@ -147,7 +147,7 @@ renameTerm :: Var -> Var -> Term ann -> Term ann
 renameTerm v1 v2 t@(Var ann v)
     | v == v1   = Var ann v2
     | otherwise = t
-renameTerm _  _ t@PrimOp{} = t
+renameTerm v1 v2 (PrimOp ann op args) = PrimOp ann op $ map (renameTerm v1 v2) args
 renameTerm v1 v2 (Value ann v) = Value ann $ renameValue v1 v2 v
 renameTerm v1 v2 (App ann t1 t2) = App ann (renameTerm v1 v2 t1) (renameTerm v1 v2 t2)
 renameTerm v1 v2 (Case ann t cs) = Case ann (renameTerm v1 v2 t) (map (renameCase v1 v2) cs)

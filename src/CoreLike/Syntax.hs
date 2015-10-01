@@ -166,7 +166,7 @@ renameTerm v1 v2 t@(LetRec ann bs body)
 -- FIXME: This is a weird name, it sounds like we're renaming multiple terms,
 -- which is not the case.
 renameTerms :: [(Var, Var)] -> Term ann -> Term ann
-renameTerms bs t = foldl' (\t1 (v, t') -> renameTerm v t' t1) t bs
+renameTerms bs t = foldl' (\t1 (v, v') -> renameTerm v v' t1) t bs
 
 renameValue :: Var -> Var -> Value ann -> Value ann
 renameValue v1 v2 v@(Lambda ann b t)

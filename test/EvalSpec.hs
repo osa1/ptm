@@ -45,8 +45,9 @@ bigStepNoSplit env s = do
     tm <- parseAssert s
     case eval (tm, env, []) of
       Nothing -> assertFailure "Can't evaluate term"
-      Just ((tm', env', stack), updates) ->
-        assertBool ("Stack is not empty:\n" ++ show (ppStack stack)) (null stack)
+      Just (state@(tm', env', stack), updates) ->
+        assertBool ("Stack is not empty. State:\n" ++ show (ppState (gcState state)))
+                   (null stack)
 
 -- bigStepNoSplit :: Env -> String -> Assertion
 -- bigStepNoSplit env term = iter (simpl $ parseTerm' term)

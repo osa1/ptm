@@ -106,7 +106,7 @@ transformExp (HSE.InfixApp e1 op e2) = do
              then return (PrimOp () pOp [e1', e2'])
              else throwError (primOpArityErr pOp 2)
         |  otherwise
-        -> return (app e1' [e1', e2'])
+        -> return (app (Var () opNm) [e1', e2'])
 
 transformExp (HSE.Lambda _ pats body) = lambda <$> collectPatArgs pats <*> transformExp body
 transformExp (HSE.If e1 e2 e3) = do
@@ -226,8 +226,8 @@ prims :: M.Map Var PrimOp'
 prims = M.fromList symbols
   where
     symbols =
-      [ ("(+)", PrimOp' Add 2), ("(-", PrimOp' Sub 2),
-        ("(*)", PrimOp' Mul 2), ("(/", PrimOp' Div 2),
+      [ ("(+)", PrimOp' Add 2), ("(-)", PrimOp' Sub 2),
+        ("(*)", PrimOp' Mul 2), ("(/)", PrimOp' Div 2),
         ("(%)", PrimOp' Mod 2), ("(==)", PrimOp' Eq 2),
         ("(<)", PrimOp' LT 2), ("(<=)", PrimOp' LTE 2) ]
 

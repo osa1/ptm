@@ -31,6 +31,9 @@ spec = do
       fromHUnitTest $ TestList $
         map (\p -> TestLabel p $ TestCase (bigStepNoSplit env p)) programs
 
+      fromHUnitTest $ TestList $
+        map (\(p, r) -> TestLabel (p ++ " = " ++ r) $ TestCase (evalRet env p r)) evalRets
+
       -- fromHUnitTest $ TestLabel "Termination tests" $ TestList $
       --   map (\p -> TestLabel p $ TestCase (tmCheckAssert env p)) programs
 
@@ -74,8 +77,20 @@ bigStepNoSplit env s = do
     case eval (tm, env, []) of
       Nothing -> assertFailure "Can't evaluate term"
       Just (state@(tm', env', stack), updates) ->
-        assertBool ("Stack is not empty. State:\n" ++ show (ppState (gcState state)))
+        assertBool ("Stack is not empty. State:\n" ++ show (ppState (gcState' state)))
                    (null stack)
+
+evalRet :: Env' -> String -> String -> Assertion
+evalRet env pgm ret = do
+    pgm' <- parseAssert pgm
+    ret' <- parseAssert ret
+    case eval (pgm', env, []) of
+      Nothing -> assertFailure "Can't evaluate term"
+      Just (s, _) ->
+        let res = residualize () s in
+        assertEqStrs "Unexpected evaluation result"
+          ret' res
+          (showPretty ret') (showPretty res)
 
 tmCheckAssert :: Env' -> String -> Assertion
 tmCheckAssert env s = do
@@ -86,7 +101,7 @@ tmCheckAssert env s = do
       Stuck -> return ()
       Termination ->
         assertFailure $ "Stopped because of termination check. Last state:\n" ++
-                        show (ppState (gcState ret))
+                        show (ppState (gcState' ret))
 
 -- bigStepNoSplit :: Env -> String -> Assertion
 -- bigStepNoSplit env term = iter (simpl $ parseTerm' term)
@@ -127,4 +142,10 @@ programs =
 
   , "reverse []"
   , "reverse [1, 2, 3]"
+  ]
+
+evalRets :: [(String, String)]
+evalRets =
+  [ ("fac 3", "6")
+  , ("fib 4", "2")
   ]

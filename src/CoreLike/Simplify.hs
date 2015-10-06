@@ -1,7 +1,10 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module CoreLike.Simplify (simpl) where
 
 import Data.Bifunctor (second)
 import Data.List (intersect)
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 
 import CoreLike.Syntax
@@ -27,18 +30,32 @@ simpl t@PrimOp{} = t
 simpl (Value ann val) = Value ann $ simplValue val
 simpl (App ann t1 t2) = App ann (simpl t1) (simpl t2)
 simpl (Case ann scrt alts) = Case ann (simpl scrt) (map (second simpl) alts)
-simpl (LetRec ann bndrs body) =
-    LetRec ann (filter ((`S.member` all_fvs) . fst) bndrs') (simpl body)
+simpl (LetRec ann bndrs body)
+  | null bndrs' = body'
+  | otherwise   = LetRec ann (gc bndrs body') body'
   where
-    bndrs' = map (second simpl) bndrs
-    body_fvs = fvsTerm body
-    bndrs_fvs = map (fvsTerm . snd) bndrs'
-    all_fvs = S.unions (body_fvs : bndrs_fvs)
+    body' = simpl body
+    bndrs' = gc bndrs body'
 
 simplValue :: Value ann -> Value ann
 simplValue (Lambda ann b t)  = Lambda ann b $ simpl t
 simplValue (Data ann con ts) = Data ann con $ map simpl ts
 simplValue v@Literal{}       = v
+
+-- | Garbage collect a binding group.
+gc :: forall ann . [(Var, Term ann)] -> Term ann -> [(Var, Term ann)]
+gc bs body = closure (mapMaybe lookupKV (S.toList (fvsTerm body)))
+  where
+    closure, closure_iter :: [(Var, Term ann)] -> [(Var, Term ann)]
+    closure bs =
+      let bs' = closure_iter bs
+       in if length bs == length bs' then bs else closure bs'
+
+    closure_iter bs' =
+      let vs = S.unions (S.fromList (map fst bs') : map (fvsTerm . snd) bs')
+       in mapMaybe lookupKV (S.toList vs)
+
+    lookupKV k = (k,) <$> lookup k bs
 
 {-
 -- Case-case transformation. We add this as a simplification pass since that's

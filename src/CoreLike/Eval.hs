@@ -253,8 +253,8 @@ evalTC s0 = go s0 []
 --------------------------------------------------------------------------------
 -- * Garbage collection
 
-gc :: Term ann -> Env ann -> Stack ann -> Env ann
-gc root env stack =
+gcState :: Term ann -> Env ann -> Stack ann -> Env ann
+gcState root env stack =
     closure (M.fromList (mapMaybe lookupKV $ S.toList used))
   where
     used_stack = S.unions $ flip map stack $ \case
@@ -277,8 +277,8 @@ gc root env stack =
 
     lookupKV k = (k,) <$> M.lookup k env
 
-gcState :: State ann -> State ann
-gcState (tm, env, s) = (tm, gc tm env s, s)
+gcState' :: State ann -> State ann
+gcState' (tm, env, s) = (tm, gcState tm env s, s)
 
 -- | Remove indirections from the heap.
 --
@@ -375,18 +375,16 @@ terminate prevs here@(t, e, s)
 --------------------------------------------------------------------------------
 -- * Residual code generation
 
--- TODO: We may need to add tags to states for this functions, similar to how we
--- had to add tags to update frames to be able to implement `unwindAll`.
-
--- residualize :: State ann -> Term ann
--- residualize (term, env, []) = simpl $ LetRec (M.toList env) term
--- residualize (term, env, Apply v : stack) = residualize (App term v, env, stack)
--- residualize (term, env, Scrutinise cases : stack) =
---     residualize (Case term cases, env, stack)
--- residualize (term, env, PrimApply op vs ts : stack) =
---     residualize (PrimOp op (map Value vs ++ term : ts), env, stack)
--- residualize (term, env, Update v : stack) =
---     residualize (Var v, M.insert v term env, stack)
+residualize :: ann -- ^ annotation for the top-level term
+            -> State ann -> Term ann
+residualize tt (term, env, []) = simpl $ LetRec tt (M.toList env) term
+residualize tt (term, env, Apply t v : stack) = residualize tt (App t term v, env, stack)
+residualize tt (term, env, Scrutinise t cases : stack) =
+    residualize tt (Case t term cases, env, stack)
+residualize tt (term, env, PrimApply t op vs ts : stack) =
+    residualize tt (PrimOp t op (map (\v -> Value (getAnnVal v) v) vs ++ term : ts), env, stack)
+residualize tt (term, env, Update t v : stack) =
+    residualize tt (Var t v, M.insert v term env, stack)
 
 {-
 -----------------------------------------------

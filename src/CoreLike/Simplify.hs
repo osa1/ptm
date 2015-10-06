@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module CoreLike.Simplify (simpl) where
+module CoreLike.Simplify (simpl, gc) where
 
 import Data.Bifunctor (second)
 import Data.List (intersect)
@@ -32,10 +32,10 @@ simpl (App ann t1 t2) = App ann (simpl t1) (simpl t2)
 simpl (Case ann scrt alts) = Case ann (simpl scrt) (map (second simpl) alts)
 simpl (LetRec ann bndrs body)
   | null bndrs' = body'
-  | otherwise   = LetRec ann (gc bndrs body') body'
+  | otherwise   = LetRec ann bndrs' body'
   where
     body' = simpl body
-    bndrs' = gc bndrs body'
+    bndrs' = gc bndrs (fvsTerm body')
 
 simplValue :: Value ann -> Value ann
 simplValue (Lambda ann b t)  = Lambda ann b $ simpl t
@@ -43,8 +43,8 @@ simplValue (Data ann con ts) = Data ann con $ map simpl ts
 simplValue v@Literal{}       = v
 
 -- | Garbage collect a binding group.
-gc :: forall ann . [(Var, Term ann)] -> Term ann -> [(Var, Term ann)]
-gc bs body = closure (mapMaybe lookupKV (S.toList (fvsTerm body)))
+gc :: forall ann . [(Var, Term ann)] -> S.Set Var -> [(Var, Term ann)]
+gc bs live = closure (mapMaybe lookupKV (S.toList live))
   where
     closure, closure_iter :: [(Var, Term ann)] -> [(Var, Term ann)]
     closure bs =

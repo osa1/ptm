@@ -255,7 +255,7 @@ evalTC s0 = go s0 []
 
 gcState :: Term ann -> Env ann -> Stack ann -> Env ann
 gcState root env stack =
-    closure (M.fromList (mapMaybe lookupKV $ S.toList used))
+    M.fromList (gc (M.toList env) live)
   where
     used_stack = S.unions $ flip map stack $ \case
       Apply _ t           -> fvsTerm t
@@ -264,18 +264,7 @@ gcState root env stack =
       Update _ v          -> S.singleton v
 
     used_term = fvsTerm root
-
-    used = S.union used_term used_stack
-
-    closure_iter e =
-      let vs = S.unions $ map (fvsTerm . snd) (M.toList e)
-       in e `M.union` M.fromList (mapMaybe lookupKV (S.toList vs))
-
-    closure e =
-      let c = closure_iter e
-       in if M.size e == M.size c then c else closure c
-
-    lookupKV k = (k,) <$> M.lookup k env
+    live = S.union used_term used_stack
 
 gcState' :: State ann -> State ann
 gcState' (tm, env, s) = (tm, gcState tm env s, s)

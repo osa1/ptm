@@ -31,8 +31,8 @@ spec = do
       fromHUnitTest $ TestList $
         map (\p -> TestLabel p $ TestCase (bigStepNoSplit env p)) programs
 
-      fromHUnitTest $ TestLabel "Termination tests" $ TestList $
-        map (\p -> TestLabel p $ TestCase (tmCheckAssert env p)) programs
+      -- fromHUnitTest $ TestLabel "Termination tests" $ TestList $
+      --   map (\p -> TestLabel p $ TestCase (tmCheckAssert env p)) programs
 
     describe "Renaming" $ fromHUnitTest $ TestList $
       [ assertRenaming  "a" "a" "x" "x"

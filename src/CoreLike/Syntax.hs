@@ -106,6 +106,22 @@ removeAnns :: Functor f => f a -> f ()
 removeAnns = fmap (const ())
 
 --------------------------------------------------------------------------------
+-- * Splitting terms into sub-terms
+
+subTerms :: Term ann -> [Term ann]
+subTerms Var{} = []
+subTerms (PrimOp _ _ ts) = ts
+subTerms (Value _ v) = subTermsVal v
+subTerms (App _ t1 t2) = [t1, t2]
+subTerms (Case _ scrt cases) = scrt : map snd cases
+subTerms (LetRec _ bs body) = map snd bs ++ [body]
+
+subTermsVal :: Value ann -> [Term ann]
+subTermsVal (Lambda _ _ body) = [body]
+subTermsVal (Data _ _ ts) = ts
+subTermsVal Literal{} = []
+
+--------------------------------------------------------------------------------
 -- * Collecting free variables
 
 fvsTerm :: Term ann -> S.Set Var

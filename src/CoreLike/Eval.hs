@@ -362,6 +362,38 @@ terminate prevs here@(t, e, s)
     currentTB = tagBag t ++ tagBagEnv e ++ tagBagStack s
 
 --------------------------------------------------------------------------------
+-- * Homeomorphic embedding stuff
+
+homEmbedTerms, homEmbedTerms' :: Term ann -> Term ann -> Bool
+homEmbedTerms t1 t2 =
+    homEmbedTerms' t1 t2
+      || any (flip homEmbedTerms t2) (subTerms t1)
+
+homEmbedTerms' Var{} Var{} = True
+homEmbedTerms' (PrimOp _ _ ts1) (PrimOp _ _ ts2) = and $ zipWith homEmbedTerms ts1 ts2
+homEmbedTerms' (Value _ v1) (Value _ v2) = homEmbedValues v1 v2
+homEmbedTerms' (App _ t1_1 t1_2) (App _ t2_1 t2_2) =
+    homEmbedTerms t1_1 t2_1 && homEmbedTerms t1_2 t2_2
+homEmbedTerms' (Case _ t1 cases1) (Case _ t2 cases2) =
+    homEmbedTerms t1 t2 && and (zipWith homEmbedTerms (map snd cases1) (map snd cases2))
+homEmbedTerms' (LetRec _ bs1 body1) (LetRec _ bs2 body2) =
+    -- TODO: I don't know what to do with binders here.
+    homEmbedTerms body1 body2
+homEmbedTerms' _ _ = False
+
+homEmbedValues, homEmbedValues' :: Value ann -> Value ann -> Bool
+homEmbedValues v1 v2 =
+    homEmbedValues' v1 v2
+      || any (flip homEmbedTerms (Value undefined v2)) (subTermsVal v1)
+
+homEmbedValues' (Lambda _ _ body1) (Lambda _ _ body2) = homEmbedTerms body1 body2
+homEmbedValues' (Data _ c1 ts1) (Data _ c2 ts2)
+  | c1 /= c2  = False
+  | otherwise = and $ zipWith homEmbedTerms ts1 ts2
+homEmbedValues' Literal{} Literal{} = True
+homEmbedValues' _ _ = False
+
+--------------------------------------------------------------------------------
 -- * Residual code generation
 
 residualize :: ann -- ^ annotation for the top-level term

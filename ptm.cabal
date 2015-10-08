@@ -24,6 +24,8 @@ library
     CoreLike.ToHSE
     CoreLike.Utils
 
+    CoreLike.MSG
+
     Deforestation.Deforest
     Deforestation.Parser
     Deforestation.Syntax

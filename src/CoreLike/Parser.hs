@@ -113,9 +113,9 @@ transformExp (HSE.If e1 e2 e3) = do
     e1' <- transformExp e1
     e2' <- transformExp e2
     e3' <- transformExp e3
-    return $ Case () e1' [(DataAlt "True" [], e2'), (DataAlt "False" [], e3')]
+    return $ Case () e1' (sortCases [ (DataAlt "True" [], e2'), (DataAlt "False" [], e3') ])
 transformExp (HSE.Paren e) = transformExp e
-transformExp (HSE.Case e alts) = Case () <$> transformExp e <*> mapM transformAlt alts
+transformExp (HSE.Case e alts) = Case () <$> transformExp e <*> (sortCases <$> mapM transformAlt alts)
 transformExp (HSE.List es) = list <$> mapM transformExp es
 transformExp (HSE.Let (HSE.BDecls decls) body) =
     LetRec () <$> mapM transformDecl decls <*> transformExp body

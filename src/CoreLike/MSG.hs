@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 -- | Most specific generalization of terms.
 module CoreLike.MSG where
 
@@ -5,7 +7,6 @@ import CoreLike.Syntax
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Safe (headMay)
 
 -- Non-capturing substitution: A substitution that doesn't make a free variable
 -- bound.
@@ -45,7 +46,8 @@ foldMsgs (t_l : ts_l) sl (t_r : ts_r) sr rs = do
 
 foldMsgs _ _ _ _ _ = error "foldMsgs: arguments with different number of terms"
 
-msg :: Term ann -> Subst ann -> Term ann -> Subst ann -> Rigids
+msg :: forall ann .
+       Term ann -> Subst ann -> Term ann -> Subst ann -> Rigids
     -> Maybe (Subst ann, Term ann, Subst ann)
 
 msg (Var al vl) sl (Var ar vr) sr rs = do
@@ -93,11 +95,52 @@ msg vl@(Value al1 (Lambda al2 bl body_l)) sl vr@(Value ar1 (Lambda ar2 br body_r
        -- TODO: I'm a bit tired at the moment, make sure these are correct.
        msg (Value al1 (Lambda al2 fv body_l')) sl (Value ar1 (Lambda ar2 fv body_r')) sr rs'
 
+msg (Case _ _ cases_l) _ (Case _ _ cases_r) _ _
+  | not expected
+  = error "msg: Case expressions have unexpected cases"
+  where
+    expected =
+      length cases_l == length cases_r &&
+        and (zipWith compareCaseBndrs (map fst cases_l) (map fst cases_r))
+
+    compareCaseBndrs DefaultAlt{}       DefaultAlt{}       = True
+    compareCaseBndrs (LiteralAlt l1)    (LiteralAlt l2)    = l1 == l2
+    compareCaseBndrs (DataAlt con1 ts1) (DataAlt con2 ts2) =
+      con1 == con2 && length ts1 == length ts2
+    compareCaseBndrs _                  _                  = False
+
+msg t1@(Case ann tl0 cases_l) sl0 t2@(Case _ tr0 cases_r) sr0 rs = do
+    (sl, t, sr) <- msg tl0 sl0 tr0 sr0 rs
+    let
+      allVars  = vars t1 `S.intersection` vars t2
+      -- `renameCaseBinders` will return cases with same binder names in
+      -- corresponding cases because 1) we pass same `allVars`, so list of
+      -- generated fresh variables will be the same 2) cases are sorted, and
+      -- number of binders in patterns are the same 3) no binder is used
+      -- multiple times in a pattern. (FIXME: (3) is not guaranteed for now)
+      cases_l' = renameCaseBinders allVars cases_l
+      cases_r' = renameCaseBinders allVars cases_r
+
+    (sl', cases, sr') <- foldMsgCase cases_l' sl cases_r' sr
+    return (sl', Case ann t cases, sr')
+  where
+    foldMsgCase :: [(AltCon, Term ann)] -> Subst ann
+                -> [(AltCon, Term ann)] -> Subst ann
+                -> Maybe (Subst ann, [(AltCon, Term ann)], Subst ann)
+    foldMsgCase [] sl [] sr = return (sl, [], sr)
+    foldMsgCase ((con, rhs_l) : csl) sl ((_, rhs_r) : csr) sr = do
+      (sl',  rhs,  sr')  <- msg rhs_l sl rhs_r sr (altConVars con `S.intersection` rs)
+      (sl'', rest, sr'') <- foldMsgCase csl sl' csr sr'
+      return (sl'', (con, rhs) : rest, sr'')
+    foldMsgCase _ _ _ _ = error "foldMsgCase: Different number of cases"
+
 msg (LetRec _ bndrs_l body_l) sl (LetRec _ bndrs_r body_r) sr rs =
     -- TODO: I'm confused about how to handle this. I don't think the solution
     -- in the paper is good enough. We need to somehow handle different names,
     -- different orderings etc. in the bindings.
     undefined
+
+msg _ _ _ _ _ = Nothing
 
 msgVar :: Var -> ann -> Subst ann -- left
        -> Var -> ann -> Subst ann -- right
@@ -113,15 +156,31 @@ msgVar vl _ sl vr _ sr rs
   | left_ss  <- lookupSubstRhs vl sl
   , right_ss <- lookupSubstRhs vr sr
   , let vs = S.intersection left_ss right_ss
+  , (v : _)  <- S.toList vs
   = -- TODO: This case doesn't make sense, as in, I don't understand how can
     -- this happen. Should investigate this further later.
-    (sl, , sr) <$> headMay (S.toList vs)
+    Just (sl, v, sr)
 
 msgVar vl al sl vr ar sr rs =
     Just (M.insert fv (Var al vl) sl, fv, M.insert fv (Var ar vr) sr)
   where
     fv = freshIn rs
 
+--------------------------------------------------------------------------------
+
 -- TODO: Generate variables with different prefix to be able to track
 freshIn :: Rigids -> Var
 freshIn = freshFor
+
+renameCaseBinders :: S.Set Var -> [(AltCon, Term ann)] -> [(AltCon, Term ann)]
+renameCaseBinders = map . renameCaseBinders'
+
+renameCaseBinders' :: S.Set Var -> (AltCon, Term ann) -> (AltCon, Term ann)
+renameCaseBinders' used (DataAlt con vs, rhs) =
+    let con_rns = zip vs (freshVarsFor used)
+     in (DataAlt con (map snd con_rns), renameTerms con_rns rhs)
+renameCaseBinders' _ c@(LiteralAlt{}, _) = c
+renameCaseBinders' _ c@(DefaultAlt Nothing, _) = c
+renameCaseBinders' used (DefaultAlt (Just v), rhs) =
+    let fresh = freshFor used
+     in (DefaultAlt (Just fresh), renameTerm v fresh rhs)

@@ -4,7 +4,7 @@ module CoreLike.Syntax where
 
 import Data.Bifunctor (second)
 import Data.Binary (Binary)
-import Data.List (foldl')
+import Data.List (foldl', sortOn)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
@@ -75,6 +75,12 @@ primOpStr Mod = "%"
 primOpStr Eq  = "=="
 primOpStr LT  = "<"
 primOpStr LTE = "<="
+
+--------------------------------------------------------------------------------
+-- * Some simple transformations
+
+sortCases :: [(AltCon, Term ann)] -> [(AltCon, Term ann)]
+sortCases = sortOn fst
 
 --------------------------------------------------------------------------------
 -- * Working with annotations

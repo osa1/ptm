@@ -134,11 +134,34 @@ msg t1@(Case ann tl0 cases_l) sl0 t2@(Case _ tr0 cases_r) sr0 rs = do
       return (sl'', (con, rhs) : rest, sr'')
     foldMsgCase _ _ _ _ = error "foldMsgCase: Different number of cases"
 
-msg (LetRec _ bndrs_l body_l) sl (LetRec _ bndrs_r body_r) sr rs =
-    -- TODO: I'm confused about how to handle this. I don't think the solution
-    -- in the paper is good enough. We need to somehow handle different names,
-    -- different orderings etc. in the bindings.
-    undefined
+-- Here's how we handle LetRecs:
+--
+-- We make some simplifying assumptions, otherwise this problem is too hard to
+-- solve. Assume that we have these two expressions:
+--
+--   let x = t1        let a = t3
+--       y = t2            b = t4
+--    in ...            in ...
+--
+-- There's no easy/good way to rename x, y, a, b in a way that 1) gives us a msg
+-- if possible 2) not exponential as lets get nested.
+--
+-- But, we observe that often both expressions are coming from same code, like
+-- in the case of recursive calls. This means that we can assume we have same
+-- list of binders, if the assumption doesn't hold we just fail.
+--
+msg (LetRec _ bndrs_l _) _ (LetRec _ bndrs_r _) _ _
+  | not expected
+  = error "msg: Unpextecped LetRecs"
+  where
+    expected = map fst bndrs_l == map fst bndrs_r
+
+msg (LetRec ann bndrs_l body_l) sl (LetRec _ bndrs_r body_r) sr rs = do
+    let bndrs = map fst bndrs_l
+        rs'   = rs `S.intersection` S.fromList bndrs
+    (sl', rhss, sr') <- foldMsgs (map snd bndrs_l) sl (map snd bndrs_r) sr rs'
+    (sl'', body, sr'') <- msg body_l sl' body_r sr' rs'
+    return (sl'', LetRec ann (zip bndrs rhss) body, sr'')
 
 msg _ _ _ _ _ = Nothing
 

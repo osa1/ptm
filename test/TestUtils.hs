@@ -6,6 +6,9 @@ import Control.Monad (unless)
 
 import Test.HUnit.Lang
 
+import CoreLike.Parser
+import CoreLike.Syntax
+
 type Assertion' = IO
 
 assertFailure' :: String -> Assertion' a
@@ -23,3 +26,13 @@ assertEqStrs preface expected actual expectedStr actualStr =
 fromRight :: Show a => Either a b -> b
 fromRight (Right r) = r
 fromRight (Left l)  = error $ "fromRight: found Left: " ++ show l
+
+parseAssert :: String -> Assertion' Term'
+parseAssert s =
+    case parseTerm s of
+      Left err -> assertFailure' ("Can't parse " ++ s ++ ": " ++ err)
+      Right tm -> return tm
+
+assertJust :: Maybe a -> Assertion' a
+assertJust Nothing  = assertFailure' "Expected a Just value, found Nothing"
+assertJust (Just a) = return a

@@ -65,12 +65,6 @@ isValue Value{} = return ()
 isValue (LetRec _ _ Value{}) = return ()
 isValue notVal    = assertFailure (show notVal ++ " is not a value.")
 
-parseAssert :: String -> Assertion' Term'
-parseAssert s =
-    case parseTerm s of
-      Left err -> assertFailure ("Can't parse " ++ s ++ ": " ++ err) >> undefined
-      Right tm -> return tm
-
 bigStepNoSplit :: Env' -> String -> Assertion
 bigStepNoSplit env s = do
     tm <- parseAssert s

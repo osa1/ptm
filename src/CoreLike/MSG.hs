@@ -8,6 +8,8 @@ import CoreLike.Syntax
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
+--------------------------------------------------------------------------------
+
 -- Non-capturing substitution: A substitution that doesn't make a free variable
 -- bound.
 --
@@ -15,6 +17,11 @@ import qualified Data.Set as S
 -- variables to `msg`.
 
 type Subst ann = M.Map Var (Term ann)
+
+type Subst' = Subst ()
+
+emptySubsts :: Subst ann
+emptySubsts = M.empty
 
 lookupSubstRhs :: Var -> Subst ann -> S.Set Var
 lookupSubstRhs v0 = M.foldlWithKey' f S.empty
@@ -25,12 +32,20 @@ lookupSubstRhs v0 = M.foldlWithKey' f S.empty
       | otherwise = acc
     f acc _ _ = acc
 
+--------------------------------------------------------------------------------
+
 type Rigids = S.Set Var
+
+emptyRigids :: Rigids
+emptyRigids = S.empty
 
 isRigid :: Var -> Rigids -> Bool
 isRigid = S.member
 
 --------------------------------------------------------------------------------
+
+msg' :: Term ann -> Term ann -> Maybe (Subst ann, Term ann, Subst ann)
+msg' t1 t2 = msg t1 emptySubsts t2 emptySubsts emptyRigids
 
 -- Currently we use tags first(left) term. We may want to experiment with this.
 

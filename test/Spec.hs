@@ -4,9 +4,11 @@
 module Main where
 
 import qualified EvalSpec
+import qualified MSGSpec
 import qualified ParserSpec
 
 import Test.Hspec
 
 main :: IO ()
-main = hspec $ sequence_ [ ParserSpec.spec, EvalSpec.spec ]
+main = hspec $ sequence_
+    [ ParserSpec.spec, EvalSpec.spec, MSGSpec.spec ]

@@ -148,7 +148,7 @@ test-suite tests
     haskell-src-exts,
     hspec,
     hspec-contrib,
-    HUnit
+    HUnit >=1.3 && <1.4
 
   default-extensions:
     MultiWayIf

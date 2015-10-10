@@ -9,7 +9,7 @@ import Test.HUnit.Lang
 type Assertion' = IO
 
 assertFailure' :: String -> Assertion' a
-assertFailure' msg = msg `deepseq` E.throwIO (HUnitFailure msg)
+assertFailure' msg = msg `deepseq` E.throwIO (HUnitFailure Nothing msg)
 
 -- | Like HUnit's 'assertEqual', except takes strings to be used in case of a
 -- failure.

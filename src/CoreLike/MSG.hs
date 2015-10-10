@@ -126,6 +126,15 @@ msg vl@(Value al1 (Lambda al2 bl body_l)) sl vr@(Value ar1 (Lambda ar2 br body_r
        -- TODO: I'm a bit tired at the moment, make sure these are correct.
        msg (Value al1 (Lambda al2 fv body_l')) sl (Value ar1 (Lambda ar2 fv body_r')) sr rs'
 
+msg vl@(Value al1 (Literal _ l1)) sl vr@(Value _ (Literal _ l2)) sr rs
+  | l1 == l2
+  = Just (sl, vl, sr)
+  | otherwise
+  = do -- FIXME: This is broken, we need to update rs and use this updated rs in
+       -- the rest of msg
+       let v = freshIn rs
+       return (M.insert v vl sl, Var al1 v, M.insert v vr sr)
+
 msg (Case _ _ cases_l) _ (Case _ _ cases_r) _ _
   | not expected
   = error "msg: Case expressions have unexpected cases"
@@ -189,7 +198,7 @@ msg (LetRec _ bndrs_l _) _ (LetRec _ bndrs_r _) _ _
 
 msg (LetRec ann bndrs_l body_l) sl (LetRec _ bndrs_r body_r) sr rs = do
     let bndrs = map fst bndrs_l
-        rs'   = rs `S.intersection` S.fromList bndrs
+        rs'   = rs `S.union` S.fromList bndrs
     (sl', rhss, sr') <- foldMsgs (map snd bndrs_l) sl (map snd bndrs_r) sr rs'
     (sl'', body, sr'') <- msg body_l sl' body_r sr' rs'
     return (sl'', LetRec ann (zip bndrs rhss) body, sr'')

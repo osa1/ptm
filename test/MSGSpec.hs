@@ -25,6 +25,8 @@ spec = do
       fromHUnitTest $ assertMsg "(\\x -> x)" "(\\y -> y)"
       fromHUnitTest $ assertMsg "(\\a b -> (a, b))" "(\\x y -> (x, y))"
       fromHUnitTest $ assertMsg "x" "x"
+      fromHUnitTest $ assertMsg "let a = 1 in a" "let a = 1 in a"
+      fromHUnitTest $ assertMsg "(\\x -> let a = x in a)" "(\\y -> let a = y in a)"
 
 assertMsg :: String -> String -> Test
 assertMsg s1 s2 =

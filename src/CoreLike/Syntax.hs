@@ -376,3 +376,71 @@ freshVarsForPfx s used =
 
 freshForPfx :: String -> S.Set Var -> Var
 freshForPfx s = (s ++) . head . freshVarsFor
+
+--------------------------------------------------------------------------------
+-- * Alpha-renaming
+
+alphaRename :: Term ann -> Term ann
+alphaRename t0 = alphaRename' S.empty t0
+
+alphaRename' :: S.Set Var -> Term ann -> Term ann
+alphaRename' _ t@Var{} = t
+alphaRename' bounds (PrimOp ann op ts) = PrimOp ann op $ map (alphaRename' bounds) ts
+alphaRename' bounds (Value ann v) = Value ann $ alphaRenameVal' bounds v
+alphaRename' bounds (App ann t1 t2) = App ann (alphaRename' bounds t1) (alphaRename' bounds t2)
+alphaRename' bounds (Case ann t cases) =
+    Case ann (alphaRename' bounds t) (alphaRenameCases bounds cases)
+
+alphaRename' bounds (LetRec ann bs body) =
+    let
+      newBinders    = map fst bs
+      currentBounds = bounds `S.union` S.fromList newBinders
+      freshBinders  = take (length newBinders) (freshVarsFor currentBounds)
+      renamings     = zip newBinders freshBinders
+
+      renamedDefs   = zip freshBinders (map (renameTerms renamings) (map snd bs))
+      renamedBody   = renameTerms renamings body
+      newBounds     = bounds `S.union` S.fromList freshBinders
+    in
+      LetRec ann (map (second (alphaRename' newBounds)) renamedDefs)
+                 (alphaRename' newBounds renamedBody)
+
+alphaRenameVal' :: S.Set Var -> Value ann -> Value ann
+alphaRenameVal' bounds (Lambda ann v t) =
+    let
+      v' = freshFor (S.insert v bounds)
+      t' = renameTerm v v' t
+     in
+      Lambda ann v' (alphaRename' (S.insert v' bounds) t')
+
+alphaRenameVal' bounds (Data ann con ts) = Data ann con $ map (alphaRename' bounds) ts
+alphaRenameVal' _ l@Literal{} = l
+
+alphaRenameCases :: S.Set Var -> [(AltCon, Term ann)] -> [(AltCon, Term ann)]
+alphaRenameCases _ [] = []
+alphaRenameCases bounds ((a@LiteralAlt{}, rhs) : rest) =
+    (a, alphaRename' bounds rhs) : alphaRenameCases bounds rest
+alphaRenameCases bounds ((DefaultAlt Nothing, rhs) : rest) =
+    (DefaultAlt Nothing, alphaRename' bounds rhs) : alphaRenameCases bounds rest
+
+alphaRenameCases bounds ((DefaultAlt (Just b), rhs) : rest) =
+    let
+      b'   = freshFor (S.insert b bounds)
+      rhs' = renameTerm b b' rhs
+     in
+      (DefaultAlt (Just b'), alphaRename' (S.insert b' bounds) rhs') : alphaRenameCases bounds rest
+
+alphaRenameCases bounds ((DataAlt con vs, rhs) : rest) =
+    let
+      freshBinders = take (length vs) (freshVarsFor (S.fromList vs `S.union` bounds))
+      renamings    = zip vs freshBinders
+      rhs'         = renameTerms renamings rhs
+      newBounds    = bounds `S.union` S.fromList freshBinders
+     in
+      (DataAlt con freshBinders, alphaRename' newBounds rhs') : alphaRenameCases bounds rest
+
+--------------------------------------------------------------------------------
+-- * Alpha-equivalence
+
+alphaEq :: Eq ann => Term ann -> Term ann -> Bool
+alphaEq t1 t2 = alphaRename t1 == alphaRename t2

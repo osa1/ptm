@@ -2,6 +2,7 @@
 
 module MSGSpec where
 
+import Control.Monad (unless)
 import qualified Data.Map as M
 
 import Test.Hspec
@@ -21,17 +22,17 @@ main = hspec spec
 spec :: Spec
 spec = do
     describe "MSG" $ do
-      fromHUnitTest $ assertMsg "x" "y"
+      fromHUnitTest $ assertMsg "(\\x -> x)" "(\\y -> y)"
+      fromHUnitTest $ assertMsg "(\\a b -> (a, b))" "(\\x y -> (x, y))"
       fromHUnitTest $ assertMsg "x" "x"
-      fromHUnitTest $ assertMsg "(a, b)" "(x, y)"
 
 assertMsg :: String -> String -> Test
 assertMsg s1 s2 =
     TestLabel ("msg of " ++ s1 ++ " and " ++ s2) $ TestCase $ do
       t1  <- parseAssert s1
       t2  <- parseAssert s2
-      msg <- assertJust (msg' t1 t2)
-      msgProps t1 t2 msg
+      (sl, t, sr) <- assertJust (msg' t1 t2)
+      assertAlphaEq (applySubsts sl t) (applySubsts sr t)
 
 msgProps :: Term' -> Term' -> (Subst', Term', Subst') -> Assertion
 msgProps t1 t2 msg@(M.toList -> t1_s, t, M.toList -> t2_s) = do
@@ -44,6 +45,20 @@ msgProps t1 t2 msg@(M.toList -> t1_s, t, M.toList -> t2_s) = do
   where
     errMsg = "MSG + substitutions does not give us the term.\n" ++ msgFailMsg msg
 
+assertAlphaEq :: Term' -> Term' -> Assertion
+assertAlphaEq term1 term2 =
+    unless (term1_a == term2_a) (assertFailure msg)
+  where
+    term1_a = alphaRename term1
+    term2_a = alphaRename term2
+
+    msg = unlines
+      [ "Terms are not alpha-equivalent."
+      , "First term:", showPretty term1
+      , "Alpha renamed:", showPretty term1_a
+      , "Second term:", showPretty term2
+      , "Alpha renamed:", showPretty term2_a
+      ]
 
 msgFailMsg :: (Subst', Term', Subst') -> String
 msgFailMsg (M.toList -> s1, t, M.toList -> s2) = unlines

@@ -3,6 +3,7 @@
 -- | Most specific generalization of terms.
 module CoreLike.MSG where
 
+import CoreLike.Parser (parseTerm')
 import CoreLike.Syntax
 
 import qualified Data.Map.Strict as M
@@ -32,8 +33,13 @@ lookupSubstRhs v0 = M.foldlWithKey' f S.empty
       | otherwise = acc
     f acc _ _ = acc
 
+applySubsts :: Subst ann -> Term ann -> Term ann
+applySubsts s t = substTerms (M.toList s) t
+
 --------------------------------------------------------------------------------
 
+-- | Rigids variables are variables we should avoid generating. It's basically a
+-- set of bound variables in our MSG term.
 type Rigids = S.Set Var
 
 emptyRigids :: Rigids
@@ -45,7 +51,17 @@ isRigid = S.member
 --------------------------------------------------------------------------------
 
 msg' :: Term ann -> Term ann -> Maybe (Subst ann, Term ann, Subst ann)
-msg' t1 t2 = msg t1 emptySubsts t2 emptySubsts emptyRigids
+msg' t1 t2 =
+    -- We initialize rigids as free variables, because we don't want to
+    -- accidentally capture variables and most of the time(only exception I can
+    -- think of is tests) arguments should be closed terms. If they're not, we
+    -- just assume they're sub-terms of a closed term, so free variables should
+    -- be bound in some context.
+    msg t1 emptySubsts t2 emptySubsts (fvsTerm t1 `S.union` fvsTerm t2)
+
+-- | For testing in REPL
+msgStr :: String -> String -> Maybe (Subst', Term', Subst')
+msgStr t1 t2 = msg' (parseTerm' t1) (parseTerm' t2)
 
 -- Currently we use tags first(left) term. We may want to experiment with this.
 
@@ -167,7 +183,7 @@ msg t1@(Case ann tl0 cases_l) sl0 t2@(Case _ tr0 cases_r) sr0 rs = do
 --
 msg (LetRec _ bndrs_l _) _ (LetRec _ bndrs_r _) _ _
   | not expected
-  = error "msg: Unpextecped LetRecs"
+  = error "msg: Unexpected LetRecs"
   where
     expected = map fst bndrs_l == map fst bndrs_r
 
